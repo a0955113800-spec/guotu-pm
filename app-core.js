@@ -87,16 +87,17 @@ const stamp = () => ({ updatedAt: new Date().toISOString(), updatedBy: S.myUid |
 A.put = async function (coll, id, data) {
   data = Object.assign({}, data, stamp()); delete data.id;
   if (!db) { localApply(coll, id, data, false); return true; }
-  try { await db.collection(coll).doc(id).set(data); return true; } catch (e) { writeErr(e); return false; }
+  try { await db.collection(coll).doc(id).set(data); A.saved(); return true; } catch (e) { writeErr(e); return false; }
 };
 A.patch = async function (coll, id, data) {
   data = Object.assign({}, data, stamp());
   if (!db) { localApply(coll, id, data, true); return true; }
-  try { await db.collection(coll).doc(id).update(data); return true; } catch (e) { writeErr(e); return false; }
+  try { await db.collection(coll).doc(id).update(data); A.saved(); return true; } catch (e) { writeErr(e); return false; }
 };
 A.del = async function (coll, id) {
   if (!db) { localApply(coll, id, null); return true; }
-  try { await db.collection(coll).doc(id).delete(); return true; } catch (e) { writeErr(e); return false; }
+  myDel.add(coll + '/' + id);
+  try { await db.collection(coll).doc(id).delete(); A.saved(); return true; } catch (e) { writeErr(e); return false; }
 };
 A.putConfig = async function (key, data) {
   if (!db) { S[key] = data; A.schedule(); return true; }
@@ -137,7 +138,7 @@ async function boot() {
   const done = () => { first++; if (first >= need && !S.ready) { S.ready = true; setConn('on', '即時同步'); A.schedule(); } };
   A.COLLS.forEach(c => {
     let got = false;
-    db.collection(c).onSnapshot(snap => { S[c] = snap.docs.map(d => Object.assign({ id: d.id }, d.data())); if (!got) { got = true; done(); } A.schedule(); },
+    db.collection(c).onSnapshot(snap => { const prev = S[c]; S[c] = snap.docs.map(d => Object.assign({ id: d.id }, d.data())); if (got) A.noteChanges(c, snap, prev); if (!got) { got = true; done(); } A.schedule(); },
       () => { setConn('off', '同步中斷'); A.toast('資料同步中斷，請重新整理頁面。'); });
   });
   let gotCfg = false;
@@ -151,7 +152,10 @@ async function boot() {
   window.claude.use('assets').then(a => { A.assets = a; A.schedule(); }).catch(() => {});
   window.claude.use('room').then(r => {
     A.room = r; if (!r) return;
-    r.onPeers(ch => { S.peers = ch.peers.filter(p => p.kind === 'viewer'); A.renderOnline(); A.schedule(); }, () => {});
+    let sigO = '', sigR = '';
+    r.onPeers(ch => { const ps = ch.peers.filter(p => p.kind === 'viewer'); S.peers = ps;
+      const o = JSON.stringify(ps.map(p => p.by || p.peer).sort()), rr = JSON.stringify(ps.filter(p => !p.sameTab && p.presence && p.presence.rec).map(p => p.peer + ':' + p.presence.rec).sort());
+      if (o !== sigO) { sigO = o; A.renderOnline(); } if (rr !== sigR) { sigR = rr; A.schedule(); } }, () => {});
     A.presence({ page: S.page, rec: null, me: S.myUid || null });
   }).catch(() => {});
 }
@@ -325,6 +329,51 @@ A.exportCSV = async function (name, rows) {
   const text = '﻿' + rows.map(r => r.map(esc).join(',')).join('\r\n');
   if (!A.downloads) { A.toast('這個檢視無法下載檔案。'); return; }
   try { await A.downloads.save({ filename: name + '.csv', data: text }); } catch (e) { if (!e || e.code !== 'declined') A.toast('匯出失敗：' + ((e && e.message) || '')); }
+};
+
+/* 更新提示：自己存檔顯示「已儲存」，別人改了資料跳通知卡 */
+const myDel = new Set();
+let savedT = 0;
+A.saved = function () { clearTimeout(savedT); savedT = setTimeout(() => { if (!document.querySelector('.toast')) A.toast('已儲存'); }, 250); };
+const COLL_LB = { tasks: '工項', meetings: '會議', issues: '議題', letters: '公文', reviews: '審查意見', people: '成員' };
+const KIND = { tasks: 'task', meetings: 'meeting', issues: 'issue', letters: 'letter', reviews: 'review' };
+const recName = d => (d && (d.title || d.name || d.subject || d.no)) || '';
+let noteQ = [], noteT = 0;
+A.noteChanges = function (c, snap, prev) {
+  if (!snap || typeof snap.docChanges !== 'function' || !COLL_LB[c]) return;
+  snap.docChanges().forEach(ch => {
+    const id = ch.doc.id, d = ch.doc.data() || {};
+    if (ch.doc.metadata && ch.doc.metadata.hasPendingWrites) return;
+    if (ch.type === 'removed') { if (myDel.has(c + '/' + id)) { myDel.delete(c + '/' + id); return; } noteQ.push({ c, id, type: 'removed', name: recName(d), by: null }); return; }
+    if (!d.updatedBy || d.updatedBy === S.myUid) return;
+    const old = (prev || []).find(x => x.id === id);
+    noteQ.push({ c, id, type: ch.type === 'added' ? 'added' : 'modified', name: recName(d), by: d.updatedBy, st: old && d.status && old.status !== d.status ? d.status : '' });
+  });
+  clearTimeout(noteT); noteT = setTimeout(flushNotes, 1200);
+};
+async function flushNotes() {
+  const q = noteQ; noteQ = []; if (!q.length) return;
+  const groups = {}; q.forEach(n => { const k = (n.by || '-') + '|' + n.c + '|' + n.type; (groups[k] = groups[k] || []).push(n); });
+  const ids = [...new Set(q.map(n => n.by).filter(Boolean))]; if (ids.length) await A.profiles(ids);
+  Object.values(groups).forEach(g => {
+    const n = g[0], who = n.by ? (A.profName(n.by) || '有人') : '', lb = COLL_LB[n.c], verb = n.type === 'added' ? '新增了' : n.type === 'removed' ? '刪除了' : '更新了';
+    let txt;
+    if (g.length > 1) txt = (who || '有人') + ' ' + verb + ' ' + g.length + ' 筆' + lb;
+    else if (n.type === 'removed') txt = lb + '「' + n.name + '」已被刪除';
+    else txt = who + ' ' + verb + lb + '「' + n.name + '」' + (n.st ? '，狀態改為「' + n.st + '」' : '');
+    A.notify(txt, who, g.length === 1 && n.type !== 'removed' && KIND[n.c] ? () => A.openDrawer(KIND[n.c], n.id) : null);
+  });
+}
+A.notify = function (txt, who, onOpen) {
+  let box = document.getElementById('notes'); if (!box) { box = h('div', { id: 'notes', class: 'notes', 'aria-live': 'polite' }); document.body.append(box); }
+  const x = h('button', { class: 'x', type: 'button', 'aria-label': '關閉通知' }, '×');
+  const card = h('div', { class: 'note' + (onOpen ? ' go' : '') }, h('span', { class: 'nav0' }, (who || '・').slice(0, 1)), h('div', { style: 'min-width:0' }, txt, h('small', null, '剛剛' + (onOpen ? '．點一下查看' : ''))), x);
+  const close = () => { card.classList.add('out'); setTimeout(() => card.remove(), 200); };
+  x.addEventListener('click', e => { e.stopPropagation(); close(); });
+  if (onOpen) card.addEventListener('click', () => { close(); onOpen(); });
+  box.append(card); while (box.children.length > 4) box.firstChild.remove();
+  let t = setTimeout(close, 8000);
+  card.addEventListener('mouseenter', () => clearTimeout(t)); card.addEventListener('mouseleave', () => { t = setTimeout(close, 3000); });
 };
 
 A.boot = boot;
