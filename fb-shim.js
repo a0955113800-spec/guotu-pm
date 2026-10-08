@@ -38,12 +38,31 @@ function gate(title, msg, btns) {
 }
 const hideGate = () => { if (gateEl) { gateEl.remove(); gateEl = null; } };
 const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
-const login = () => { const pv = new firebase.auth.GoogleAuthProvider(); pv.setCustomParameters({ prompt: 'select_account' }); auth.signInWithPopup(pv).catch(e => { if (e && /popup/.test(e.code || '')) auth.signInWithRedirect(pv); else gate('登入失敗', esc((e && e.message) || ''), [['再試一次', login]]); }); };
+// 手機：不用「跳轉登入」（瀏覽器擋第三方儲存時，跳回來會遺失登入狀態，造成一直要重登），一律用彈出視窗
+const UA = navigator.userAgent || '';
+const IN_APP = /Line\/|FBAN|FBAV|Instagram|MicroMessenger|; wv\)/i.test(UA);
+const login = () => {
+  if (IN_APP) { inAppGate(); return; }
+  const pv = new firebase.auth.GoogleAuthProvider(); pv.setCustomParameters({ prompt: 'select_account' });
+  auth.signInWithPopup(pv).catch(e => {
+    const c = (e && e.code) || '';
+    if (c === 'auth/popup-closed-by-user' || c === 'auth/cancelled-popup-request') return;
+    if (c === 'auth/popup-blocked') { gate('登入視窗被擋住了', '瀏覽器擋住了 Google 登入的小視窗。<br>請再按一次；還是不行的話，請在瀏覽器設定裡允許這個網站開啟彈出式視窗。', [['再試一次', login]]); return; }
+    gate('登入失敗', esc((e && e.message) || ''), [['再試一次', login]]);
+  });
+};
+function inAppGate() {
+  gate('請改用瀏覽器開啟', '你現在是在 App 內建的瀏覽器裡（例如 Facebook、Instagram），Google 不允許在這裡登入，也記不住登入狀態。<br>請按右上角選單，選「用瀏覽器開啟」，或複製網址貼到 Safari／Chrome。', [['複製網址', () => { const u = location.origin + location.pathname; (navigator.clipboard ? navigator.clipboard.writeText(u) : Promise.reject()).then(() => alert('已複製，請貼到 Safari 或 Chrome 開啟。'), () => prompt('請複製這個網址：', u)); }]]);
+}
+// LINE 內建瀏覽器可以用參數直接改開手機預設瀏覽器
+if (/Line\//i.test(UA) && !/openExternalBrowser=1/.test(location.search)) location.replace(location.pathname + (location.search ? location.search + '&' : '?') + 'openExternalBrowser=1' + location.hash);
+// 登入狀態存在本機，關掉瀏覽器再開也不用重登
+auth.setPersistence(firebase.auth.Auth.Persistence.LOCAL).catch(() => {});
 const logout = () => auth.signOut().then(() => location.reload());
 window.FB_LOGOUT = logout;
 
 auth.onAuthStateChanged(async u => {
-  if (!u) { gate('國土通檢專案控管', '請用 Google 帳號登入。<br>只有加入名單的成員可以使用。', [['用 Google 帳號登入', login]]); return; }
+  if (!u) { if (IN_APP) { inAppGate(); return; } gate('國土通檢專案控管', '請用 Google 帳號登入。<br>只有加入名單的成員可以使用。', [['用 Google 帳號登入', login]]); return; }
   me = u; const em = lc(u.email);
   gate('登入中', '正在確認權限…', []);
   fs.collection('users').doc(u.uid).set({ name: u.displayName || u.email || '', email: em, photo: u.photoURL || '', at: Date.now() }, { merge: true }).catch(() => {});
