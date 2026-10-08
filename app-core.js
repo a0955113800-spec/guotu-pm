@@ -49,7 +49,7 @@ const S = A.S = {
   people: [], tasks: [], meetings: [], issues: [], letters: [], reviews: [],
   peers: [], page: 'overview', drawer: null
 };
-A.COLLS = ['people', 'tasks', 'meetings', 'issues', 'letters', 'reviews'];
+A.COLLS = ['people', 'tasks', 'meetings', 'issues', 'letters', 'reviews', 'contacts'];
 A.newId = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
 A.byId = (coll, id) => S[coll].find(x => x.id === id);
 A.person = id => S.people.find(p => p.id === id);
@@ -137,11 +137,11 @@ async function boot() {
     try { const w = await user.can('data.write'); if (w === false) S.canWrite = false; if (w !== null) S.canWriteChecked = true; } catch (_) {}
   }
   let first = 0; const need = A.COLLS.length + 1;
-  const done = () => { first++; if (first >= need && !S.ready) { S.ready = true; setConn('on', '即時同步'); A.schedule(); } };
+  const done = () => { first++; if (first >= need && !S.ready) { S.ready = true; setConn('on', '即時同步'); A.schedule(); setTimeout(() => A.brief && A.brief(), 900); } };
   A.COLLS.forEach(c => {
     let got = false;
     db.collection(c).onSnapshot(snap => { const prev = S[c]; S[c] = snap.docs.map(d => Object.assign({ id: d.id }, d.data())); if (got) A.noteChanges(c, snap, prev); if (!got) { got = true; done(); } A.schedule(); },
-      () => { setConn('off', '同步中斷'); A.toast('資料同步中斷，請重新整理頁面。'); });
+      () => { if (c === 'contacts') { S.contactsErr = true; if (!got) { got = true; done(); } return; } setConn('off', '同步中斷'); A.toast('資料同步中斷，請重新整理頁面。'); });
   });
   let gotCfg = false;
   db.collection('config').onSnapshot(snap => {
@@ -306,7 +306,8 @@ A.openSearch = function () {
     S.meetings.forEach(m => { const mi = m.minutes || {}; const dec = (mi.decisions || []).map(x => x.text).join(' '); if (hit(m.title) || hit(mi.summary) || hit(dec) || hit(m.place)) res.push(['會議', m.title || '未命名會議', (mi.summary || dec || '').slice(0, 80), () => A.openDrawer('meeting', m.id)]); });
     S.issues.forEach(i => { const nt = Object.values(i.notes || {}).join(' '); if (hit(i.name) || hit(nt) || hit('議題 ' + i.no)) res.push(['議題', '議題 ' + i.no + (i.name ? '　' + i.name : ''), nt.slice(0, 80), () => A.openDrawer('issue', i.id)]); });
     S.tasks.forEach(t => { if (hit(t.title) || hit(t.note)) res.push(['工項', t.title, t.note || '', () => A.openDrawer('task', t.id)]); });
-    S.letters.forEach(l => { if (hit(l.subject) || hit(l.no)) res.push(['公文', l.subject || l.no, (l.kind || '') + ' ' + (l.no || ''), () => { A.go('docs'); }]); });
+    S.letters.forEach(l => { if (hit(l.subject) || hit(l.no)) res.push(['公文', l.subject || l.no, (l.kind || '') + ' ' + (l.no || ''), () => A.openDrawer('letter', l.id)]); });
+    (S.contacts || []).forEach(c => { if (hit(c.name) || hit(c.org) || hit(c.note)) res.push(['聯絡人', c.name || '', [c.org, c.title, c.phone].filter(Boolean).join('．'), () => A.openDrawer('contact', c.id)]); });
     if (!res.length) list.append(h('div', { class: 'empty' }, '找不到「' + inp.value.trim() + '」。'));
     res.slice(0, 40).forEach(([k, t, sub, fn]) => list.append(h('button', { type: 'button', onclick: () => { box.remove(); fn(); } }, h('small', null, k), h('span', null, t, h('em', null, sub)))));
   };
@@ -342,8 +343,8 @@ A.exportCSV = async function (name, rows) {
 const myDel = new Set();
 let savedT = 0;
 A.saved = function () { clearTimeout(savedT); savedT = setTimeout(() => { if (!document.querySelector('.toast')) A.toast('已儲存'); }, 250); };
-const COLL_LB = { tasks: '工項', meetings: '會議', issues: '議題', letters: '公文', reviews: '審查意見', people: '成員' };
-const KIND = { tasks: 'task', meetings: 'meeting', issues: 'issue', letters: 'letter', reviews: 'review' };
+const COLL_LB = { tasks: '工項', meetings: '會議', issues: '議題', letters: '公文', reviews: '審查意見', people: '成員', contacts: '聯絡人' };
+const KIND = { tasks: 'task', meetings: 'meeting', issues: 'issue', letters: 'letter', reviews: 'review', contacts: 'contact' };
 const recName = d => (d && (d.title || d.name || d.subject || d.no)) || '';
 let noteQ = [], noteT = 0;
 A.noteChanges = function (c, snap, prev) {
@@ -354,7 +355,7 @@ A.noteChanges = function (c, snap, prev) {
     if (ch.type === 'removed') { if (myDel.has(c + '/' + id)) { myDel.delete(c + '/' + id); return; } noteQ.push({ c, id, type: 'removed', name: recName(d), by: null }); return; }
     if (!d.updatedBy || d.updatedBy === S.myUid) return;
     const old = (prev || []).find(x => x.id === id);
-    noteQ.push({ c, id, type: ch.type === 'added' ? 'added' : 'modified', name: recName(d), by: d.updatedBy, st: old && d.status && old.status !== d.status ? d.status : '' });
+    noteQ.push({ c, id, type: ch.type === 'added' ? 'added' : 'modified', name: recName(d), by: d.updatedBy, st: old && d.status && old.status !== d.status ? d.status : '', dt: c === 'meetings' && old && d.date && old.date !== d.date ? d.date : '' });
   });
   clearTimeout(noteT); noteT = setTimeout(flushNotes, 1200);
 };
@@ -367,7 +368,7 @@ async function flushNotes() {
     let txt;
     if (g.length > 1) txt = (who || '有人') + ' ' + verb + ' ' + g.length + ' 筆' + lb;
     else if (n.type === 'removed') txt = lb + '「' + n.name + '」已被刪除';
-    else txt = who + ' ' + verb + lb + '「' + n.name + '」' + (n.st ? '，狀態改為「' + n.st + '」' : '');
+    else txt = who + ' ' + verb + lb + '「' + n.name + '」' + (n.st ? '，狀態改為「' + n.st + '」' : '') + (n.dt ? '，日期改為 ' + A.md(n.dt) : '');
     A.notify(txt, who, g.length === 1 && n.type !== 'removed' && KIND[n.c] ? () => A.openDrawer(KIND[n.c], n.id) : null);
   });
 }
@@ -417,12 +418,53 @@ A.openBell = async function () {
   });
   pop.append(ul); document.body.append(pop);
   const r = A.$('#bellBtn').getBoundingClientRect();
-  pop.style.top = (r.bottom + 8) + 'px'; pop.style.right = Math.max(12, window.innerWidth - r.right) + 'px';
+  // 靠鈴鐺右緣對齊，但不超出畫面左右（手機鈴鐺在中間時也不會跑出去）
+  const w = pop.offsetWidth, vw = document.documentElement.clientWidth;
+  pop.style.top = (r.bottom + 8) + 'px'; pop.style.left = Math.max(12, Math.min(r.right - w, vw - w - 12)) + 'px';
   setSeen(new Date().toISOString()); A.renderBell();
   setTimeout(() => { document.addEventListener('mousedown', outside, true); document.addEventListener('keydown', esc); }, 0);
 };
 document.addEventListener('click', e => { if (e.target.closest && e.target.closest('#bellBtn')) A.openBell(); });
 setInterval(() => A.renderBell(), 60000);
+
+/* Word 檔（.docx）：用 JSZip 自己組 OOXML；中文字型設標楷體（eastAsia），英數 Times New Roman */
+A.loadScript = src => new Promise((ok, no) => { if (src in loadedJs) return loadedJs[src].then(ok, no); const s = document.createElement('script'); loadedJs[src] = new Promise((a, b) => { s.onload = a; s.onerror = b; }); s.src = src; document.head.append(s); loadedJs[src].then(ok, no); });
+const loadedJs = {};
+const JSZIP = 'https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js';
+const xe = s => String(s == null ? '' : s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])).replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/g, '');
+const wruns = (text, o) => String(text == null ? '' : text).split('\n').map((ln, i) => (i ? '<w:r><w:br/></w:r>' : '') + '<w:r><w:rPr>' + (o.b ? '<w:b/><w:bCs/>' : '') + (o.sz ? '<w:sz w:val="' + o.sz * 2 + '"/><w:szCs w:val="' + o.sz * 2 + '"/>' : '') + '</w:rPr><w:t xml:space="preserve">' + xe(ln) + '</w:t></w:r>').join('');
+const wpara = (text, o = {}) => '<w:p><w:pPr>' + (o.keep ? '<w:keepNext/>' : '') + '<w:spacing w:before="' + (o.before || 0) + '" w:after="' + (o.after == null ? 60 : o.after) + '" w:line="' + (o.line || 300) + '" w:lineRule="auto"/>' + (o.left ? '<w:ind w:left="' + o.left + '" w:hanging="' + (o.hanging || 0) + '"/>' : '') + '<w:jc w:val="' + (o.align || 'both') + '"/></w:pPr>' + wruns(text, o) + '</w:p>';
+const wtbl = (widths, rows, o = {}) => {
+  const W = widths.reduce((a, b) => a + b, 0);
+  const bd = '<w:tblBorders>' + ['top', 'left', 'bottom', 'right', 'insideH', 'insideV'].map(k => '<w:' + k + ' w:val="single" w:sz="6" w:space="0" w:color="000000"/>').join('') + '</w:tblBorders>';
+  const hdr = '<w:shd w:val="clear" w:color="auto" w:fill="F2F2F2"/>';
+  return '<w:tbl><w:tblPr><w:tblW w:w="' + W + '" w:type="dxa"/><w:jc w:val="center"/>' + bd + '<w:tblLayout w:type="fixed"/><w:tblCellMar><w:top w:w="40" w:type="dxa"/><w:left w:w="80" w:type="dxa"/><w:bottom w:w="40" w:type="dxa"/><w:right w:w="80" w:type="dxa"/></w:tblCellMar></w:tblPr><w:tblGrid>' + widths.map(w => '<w:gridCol w:w="' + w + '"/>').join('') + '</w:tblGrid>' +
+    rows.map((r, ri) => {
+      const head = ri === 0 && o.header;
+      const trPr = '<w:trPr>' + (head ? '<w:tblHeader/><w:cantSplit/>' : '') + (!head && o.rowH ? '<w:trHeight w:val="' + o.rowH + '" w:hRule="atLeast"/>' : '') + '</w:trPr>';
+      if (r && r.span !== undefined) return '<w:tr>' + trPr + '<w:tc><w:tcPr><w:tcW w:w="' + W + '" w:type="dxa"/><w:gridSpan w:val="' + widths.length + '"/>' + hdr + '</w:tcPr>' + wpara(r.span, { b: true, sz: o.sz, align: 'left', after: 0 }) + '</w:tc></w:tr>';
+      return '<w:tr>' + trPr + r.map((c, ci) => { const cc = c !== null && typeof c === 'object' ? c : { t: c };
+        return '<w:tc><w:tcPr><w:tcW w:w="' + widths[ci] + '" w:type="dxa"/>' + (head ? hdr : '') + '<w:vAlign w:val="' + (head || o.rowH ? 'center' : 'top') + '"/></w:tcPr>' + wpara(cc.t, { sz: o.sz, b: head, align: cc.align || (head ? 'center' : 'both'), after: 0 }) + '</w:tc>'; }).join('') + '</w:tr>';
+    }).join('') + '</w:tbl>' + wpara('', { after: 0 });
+};
+A.docx = { para: wpara, tbl: wtbl };
+A.makeDocx = async function (filename, bodyXml, o = {}) {
+  if (!A.downloads) { A.toast('這個檢視無法下載檔案。'); return; }
+  try { await A.loadScript(JSZIP); } catch (_) { A.toast('Word 產生工具載入失敗，請確認網路後再試。'); return; }
+  const z = new window.JSZip(), font = o.font || '標楷體', sz = (o.sz || 14) * 2;
+  const NS = 'xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"', XH = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>';
+  z.file('[Content_Types].xml', XH + '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/><Override PartName="/word/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.styles+xml"/><Override PartName="/word/footer1.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.footer+xml"/></Types>');
+  z.file('_rels/.rels', XH + '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/></Relationships>');
+  z.file('word/_rels/document.xml.rels', XH + '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/><Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/footer" Target="footer1.xml"/></Relationships>');
+  z.file('word/styles.xml', XH + '<w:styles ' + NS + '><w:docDefaults><w:rPrDefault><w:rPr><w:rFonts w:ascii="Times New Roman" w:hAnsi="Times New Roman" w:eastAsia="' + font + '" w:cs="Times New Roman"/><w:sz w:val="' + sz + '"/><w:szCs w:val="' + sz + '"/><w:lang w:val="en-US" w:eastAsia="zh-TW"/></w:rPr></w:rPrDefault><w:pPrDefault><w:pPr><w:spacing w:after="0" w:line="300" w:lineRule="auto"/></w:pPr></w:pPrDefault></w:docDefaults><w:style w:type="paragraph" w:default="1" w:styleId="Normal"><w:name w:val="Normal"/><w:qFormat/></w:style><w:style w:type="table" w:default="1" w:styleId="TableNormal"><w:name w:val="Normal Table"/><w:tblPr><w:tblInd w:w="0" w:type="dxa"/><w:tblCellMar><w:top w:w="0" w:type="dxa"/><w:left w:w="108" w:type="dxa"/><w:bottom w:w="0" w:type="dxa"/><w:right w:w="108" w:type="dxa"/></w:tblCellMar></w:tblPr></w:style></w:styles>');
+  const fr = t => '<w:r><w:rPr><w:sz w:val="20"/></w:rPr>' + t + '</w:r>';
+  z.file('word/footer1.xml', XH + '<w:ftr ' + NS + '><w:p><w:pPr><w:jc w:val="center"/></w:pPr>' + fr('<w:fldChar w:fldCharType="begin"/>') + fr('<w:instrText xml:space="preserve"> PAGE </w:instrText>') + fr('<w:fldChar w:fldCharType="separate"/>') + fr('<w:t>1</w:t>') + fr('<w:fldChar w:fldCharType="end"/>') + '</w:p></w:ftr>');
+  const land = !!o.landscape;
+  z.file('word/document.xml', XH + '<w:document ' + NS + ' xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><w:body>' + bodyXml + '<w:sectPr><w:footerReference w:type="default" r:id="rId2"/><w:pgSz w:w="' + (land ? 16838 : 11906) + '" w:h="' + (land ? 11906 : 16838) + '"' + (land ? ' w:orient="landscape"' : '') + '/><w:pgMar w:top="1134" w:right="1134" w:bottom="1134" w:left="1134" w:header="567" w:footer="567" w:gutter="0"/></w:sectPr></w:body></w:document>');
+  const blob = await z.generateAsync({ type: 'blob', mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' });
+  try { await A.downloads.save({ filename, data: blob }); } catch (e) { if (!e || e.code !== 'declined') A.toast('下載失敗：' + ((e && e.message) || '')); }
+};
+A.money = n => Math.round(Number(n) || 0).toLocaleString('zh-TW');
 
 A.boot = boot;
 })();

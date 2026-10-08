@@ -43,7 +43,7 @@ const UA = navigator.userAgent || '';
 const IN_APP = /Line\/|FBAN|FBAV|Instagram|MicroMessenger|; wv\)/i.test(UA);
 const login = () => {
   if (IN_APP) { inAppGate(); return; }
-  const pv = new firebase.auth.GoogleAuthProvider(); pv.setCustomParameters({ prompt: 'select_account' });
+  const pv = new firebase.auth.GoogleAuthProvider(); const last = accGet(); pv.setCustomParameters(last && last.em ? { prompt: 'select_account', login_hint: last.em } : { prompt: 'select_account' });
   auth.signInWithPopup(pv).catch(e => {
     const c = (e && e.code) || '';
     if (c === 'auth/popup-closed-by-user' || c === 'auth/cancelled-popup-request') return;
@@ -58,17 +58,31 @@ function inAppGate() {
 if (/Line\//i.test(UA) && !/openExternalBrowser=1/.test(location.search)) location.replace(location.pathname + (location.search ? location.search + '&' : '?') + 'openExternalBrowser=1' + location.hash);
 // 登入狀態存在本機，關掉瀏覽器再開也不用重登
 auth.setPersistence(firebase.auth.Auth.Persistence.LOCAL).catch(() => {});
-const logout = () => auth.signOut().then(() => location.reload());
+// 記住登入：Firebase 的登入狀態存在這個瀏覽器（關掉再開不用重登）；另外記住「這個帳號是成員」，重開時直接進畫面、背景再確認權限
+const ACC_K = 'gt-acc';
+const accGet = () => { try { return JSON.parse(localStorage.getItem(ACC_K) || 'null'); } catch (_) { return null; } };
+const accSet = v => { try { v ? localStorage.setItem(ACC_K, JSON.stringify(v)) : localStorage.removeItem(ACC_K); } catch (_) {} };
+const logout = () => { accSet(null); auth.signOut().then(() => location.reload()); };
 window.FB_LOGOUT = logout;
+const denied = em => gate('沒有使用權限', '<span class="em">' + esc(em) + '</span><br>這個帳號還不在成員名單裡，請管理者把這個 email 加進後台的成員表。', [['換一個帳號', logout, true]]);
+let started = false;
+const start = (u, em) => { if (started) return; started = true; window.FB_EMAIL = em; window.FB_NAME = u.displayName || ''; hideGate(); readyFn(); };
 
 auth.onAuthStateChanged(async u => {
-  if (!u) { if (IN_APP) { inAppGate(); return; } gate('國土通檢專案控管', '請用 Google 帳號登入。<br>只有加入名單的成員可以使用。', [['用 Google 帳號登入', login]]); return; }
-  me = u; const em = lc(u.email);
-  gate('登入中', '正在確認權限…', []);
+  if (!u) {
+    if (IN_APP) { inAppGate(); return; }
+    const was = accGet();
+    gate('國土通檢專案控管', was ? '這個瀏覽器的登入紀錄不見了，請再登入一次。<br><small>如果每次打開都要重登，通常是用了無痕／私密視窗，或瀏覽器設定成「關閉時清除網站資料」。</small>' : '請用 Google 帳號登入。<br>只有加入名單的成員可以使用。', [['用 Google 帳號登入', login]]);
+    return;
+  }
+  me = u; const em = lc(u.email), cached = accGet();
+  // 之前在這台電腦確認過是成員：直接進畫面，不跳「登入中」
+  if (cached && cached.uid === u.uid) { isAdmin = !!cached.admin; isMember = true; start(u, em); }
+  else { const t = setTimeout(() => { if (!started) gate('登入中', '正在確認權限…', []); }, 600); setTimeout(() => clearTimeout(t), 8000); }
   fs.collection('users').doc(u.uid).set({ name: u.displayName || u.email || '', email: em, photo: u.photoURL || '', at: Date.now() }, { merge: true }).catch(() => {});
   let snap;
   try { snap = await fs.doc('config/access').get(); }
-  catch (e) { gate('沒有使用權限', '<span class="em">' + esc(em) + '</span><br>這個帳號還不在成員名單裡，請管理者把這個 email 加進後台的「登入名單」。', [['換一個帳號', logout, true]]); return; }
+  catch (e) { accSet(null); if (started) location.reload(); else denied(em); return; }
   if (!snap.exists) {
     gate('第一次使用', '平台還沒有設定成員名單。<br>按下面的按鈕，<span class="em">' + esc(em) + '</span> 會成為第一位管理者，之後再到後台加入其他成員。', [['設為管理者並開始', async () => {
       try { await fs.doc('config/access').set({ admins: [em], emails: [] }); location.reload(); } catch (e) { gate('設定失敗', esc((e && e.message) || ''), [['重新整理', () => location.reload()]]); } }], ['換一個帳號', logout, true]]);
@@ -77,8 +91,9 @@ auth.onAuthStateChanged(async u => {
   const ac = snap.data() || {};
   isAdmin = (ac.admins || []).map(lc).includes(em);
   isMember = isAdmin || (ac.emails || []).map(lc).includes(em);
-  if (!isMember) { gate('沒有使用權限', '<span class="em">' + esc(em) + '</span><br>這個帳號還不在成員名單裡，請管理者把這個 email 加進後台的「登入名單」。', [['換一個帳號', logout, true]]); return; }
-  window.FB_EMAIL = em; window.FB_NAME = u.displayName || ''; hideGate(); readyFn();
+  if (!isMember) { accSet(null); if (started) location.reload(); else denied(em); return; }
+  accSet({ uid: u.uid, em, admin: isAdmin });
+  start(u, em);
   // 清掉一天以上沒更新的線上紀錄
   fs.collection('presence').where('at', '<', Date.now() - 864e5).get().then(s => s.forEach(d => d.ref.delete().catch(() => {}))).catch(() => {});
 });
@@ -135,7 +150,15 @@ const api = {
 window.claude = { use: async name => { await ready; return api[name] ? api[name]() : null; } };
 
 /* 後台：登入名單、資料匯入、登出 */
+// 管理者在成員表填的 Google 帳號，自動加進登入名單（只增不減；要移除請到「登入名單」刪）
+window.FB_SYNC_ACCESS = async function () {
+  if (!isAdmin) return;
+  const add = [...new Set(window.APP.S.people.map(p => lc(p.email)).filter(x => /@/.test(x)))];
+  try { const s = await fs.doc('config/access').get(); const d = s.data() || {}, cur = (d.emails || []).map(lc), adm = (d.admins || []).map(lc);
+    const miss = add.filter(x => !cur.includes(x) && !adm.includes(x)); if (miss.length) { await fs.doc('config/access').update({ emails: cur.concat(miss) }); window.APP.toast('已把 ' + miss.length + ' 個成員的 Google 帳號加入登入名單。'); } } catch (_) {}
+};
 window.FB_ADMIN = function (frag) {
+  setTimeout(() => window.FB_SYNC_ACCESS(), 500);
   const A = window.APP, h = A.h;
   const sec = (title, sub, ...kids) => h('section', { class: 'bz' }, h('div', { class: 'core' }, h('div', { class: 'ch' }, h('h2', null, title), sub ? h('small', null, sub) : ''), h('div', { class: 'pad', style: 'display:flex;flex-direction:column;gap:12px' }, ...kids)));
   const who = h('div', { class: 'muted' }, '目前登入：' + (me ? (me.displayName || '') + '（' + me.email + '）' : '') + (isAdmin ? '．管理者' : '．成員'));
