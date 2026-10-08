@@ -373,8 +373,16 @@ function gxPref(k, d) { try { return localStorage.getItem(k) || d; } catch (_) {
 function gxSave(k, v) { try { localStorage.setItem(k, v); } catch (_) {} }
 S.gZoom = gxPref('gt-gz', 'week'); S.gLinks = gxPref('gt-gl', '1') === '1'; S.gCrit = gxPref('gt-gc', '0') === '1'; S.gOwn = gxPref('gt-go', '1') === '1';
 S.gFold = new Set(gxPref('gt-gf', '').split('|').filter(Boolean));
+// 依工項名稱長度估工項欄寬：讓大部分名稱一行放得下，太長的折成兩行
+function gxAutoLW(ts) {
+  const c = gxAutoLW.c || (gxAutoLW.c = document.createElement('canvas').getContext('2d')); c.font = '13px "Noto Sans TC", "Microsoft JhengHei", sans-serif';
+  const ws = ts.filter(t => t.due || t.start).map(t => c.measureText((t.title || '') + (t.crit ? '　關鍵' : '')).width).sort((a, b) => a - b);
+  if (!ws.length) return 260; const p = ws[Math.floor(ws.length * 0.85)] || ws[ws.length - 1];
+  return Math.round(Math.max(260, Math.min(400, p + 22 + 8 + 7 + 14)));
+}
 function ganttView(ts) {
-  const td = today(), mob = window.innerWidth < 700, LW = mob ? 130 : 250, zoom = S.gZoom;
+  const td = today(), mob = window.innerWidth < 700, zoom = S.gZoom;
+  const LW = mob ? 150 : (Number(gxPref('gt-lw', '0')) || gxAutoLW(ts));
   let DW = zoom === 'day' ? (mob ? 22 : 26) : zoom === 'week' ? (mob ? 7 : 9) : (mob ? 3 : 3.4);
   const dated = ts.filter(t => (t.due || t.start) && (!S.gCrit || t.crit)), und = ts.filter(t => !(t.due || t.start)).length;
   const chk = (k, key, label) => { const c = h('input', { type: 'checkbox' }); c.checked = S[k]; c.addEventListener('change', () => { c.blur(); S[k] = c.checked; gxSave(key, c.checked ? '1' : '0'); A.render(); }); return h('label', { class: 'gx-chk' }, c, label); };
@@ -414,7 +422,15 @@ function ganttView(ts) {
   if (zoom === 'day') dates.forEach(d => { const dt = A.parse(d); dn.append(h('div', { class: (A.isOff(d) ? 'off' : '') + (d === td ? ' td' : '') + (dls.some(v => v.d === d) ? ' ms' : '') + (dt.getDay() === 1 ? ' mon' : ''), style: 'width:' + DW + 'px', title: A.md(d) + '（' + GX_WD[dt.getDay()] + '）' }, h('b', null, String(dt.getDate())), h('small', null, GX_WD[dt.getDay()]))); });
   else if (zoom === 'week') for (let i = 0; i < days; i += 7) { const n = Math.min(7, days - i), d = dates[i]; dn.append(h('div', { class: dates.slice(i, i + n).includes(td) ? 'td' : '', style: 'width:' + n * DW + 'px', title: A.md(d) + ' 起的一週' }, A.md(d))); }
   else dn.append(h('div', { style: 'width:' + W + 'px' }));
-  const head = h('div', { class: 'gx-head' }, h('div', { class: 'gx-lab' }, '工項'), h('div', { class: 'gx-days' }, mon, dn));
+  const rsz = mob ? '' : h('span', { class: 'gx-rsz', title: '拖曳調整工項欄寬；點兩下恢復自動' });
+  const head = h('div', { class: 'gx-head' }, h('div', { class: 'gx-lab' }, '工項', rsz), h('div', { class: 'gx-days' }, mon, dn));
+  if (rsz) {
+    rsz.addEventListener('dblclick', () => { try { localStorage.removeItem('gt-lw'); } catch (_) {} A.render(); });
+    rsz.addEventListener('pointerdown', e => { e.preventDefault(); const x0 = e.clientX; let w = LW; S.dragging = true; document.body.classList.add('gx-resizing');
+      const mv = ev => { w = Math.max(180, Math.min(640, LW + ev.clientX - x0)); inner.style.setProperty('--lw', w + 'px'); };
+      const up = () => { removeEventListener('pointermove', mv); removeEventListener('pointerup', up); S.dragging = false; document.body.classList.remove('gx-resizing'); gxSave('gt-lw', String(Math.round(w))); A.pendingRender = false; A.render(); };
+      addEventListener('pointermove', mv); addEventListener('pointerup', up); });
+  }
   inner.append(head);
   const body = h('div', { class: 'gx-body' });
   const track = () => h('div', { class: 'gx-track', style: 'width:' + W + 'px' + (bg ? ';background-image:' + bg : '') });
@@ -964,7 +980,7 @@ function gxLinks(body, pos, W, LW, dated) {
   svg.append(defs); let hidden = 0;
   dated.forEach(t => (t.deps || []).forEach(d => {
     const P = pos[d], Q = pos[t.id]; if (!P || !Q) { if (A.byId('tasks', d)) hidden++; return; }
-    const y1 = P.row.offsetTop + 17, y2 = Q.row.offsetTop + 17, pred = A.byId('tasks', d);
+    const y1 = P.row.offsetTop + P.row.offsetHeight / 2, y2 = Q.row.offsetTop + Q.row.offsetHeight / 2, pred = A.byId('tasks', d);
     const kind = pred && pred.status !== '完成' && pred.due && pred.due < td ? 'r' : pred && pred.crit && t.crit ? 'c' : 'n';
     const xa = P.x2, xb = Q.x1, gap = 6; let ds;
     if (xb - gap > xa + gap) { const mx = Math.max(xa + gap, xb - gap); ds = 'M' + xa + ',' + y1 + ' H' + mx + ' V' + y2 + ' H' + xb; }
