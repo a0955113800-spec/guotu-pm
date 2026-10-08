@@ -6,6 +6,7 @@
 </head>
 <body>
 <title>國土通檢專案控管</title>
+<script>(function(){var t='light';try{t=localStorage.getItem('gt-theme')||'light'}catch(e){}document.documentElement.setAttribute('data-theme',t)})()</script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700&family=Noto+Serif+TC:wght@500;600&family=Plus+Jakarta+Sans:wght@400;500;600&family=Geist+Mono:wght@400;500&display=swap">
 <style>
@@ -96,6 +97,7 @@ button{cursor:pointer}
 .empty-s{font-size:12.5px;color:var(--muted);padding:2px 12px}
 .me{margin-top:auto;display:flex;align-items:center;gap:10px;padding:10px;border-radius:16px;background:var(--panel);box-shadow:0 0 0 1px var(--hair)}
 .me select{border:0;background:transparent;font-size:13px;max-width:140px}
+.thm{margin-top:auto;align-self:flex-start}.thm button{padding:4px 12px;font-size:12.5px}.thm+script+.me{margin-top:-10px}
 .av{width:28px;height:28px;border-radius:50%;display:grid;place-items:center;font:600 11.5px var(--num);color:var(--ink);flex:none;background:var(--chip);overflow:hidden}
 .av img{width:100%;height:100%;object-fit:cover}
 /* ---------- 主區 ---------- */
@@ -477,6 +479,8 @@ tr:last-child td{border-bottom:0}
     <div class="brand"><div class="logo"><i></i></div><div><b>國土通檢</b><small>專案控管．115A-044</small></div></div>
     <div><div class="lab">頁面</div><nav class="nav" id="nav" aria-label="頁面"></nav></div>
     <div class="today-w"><div class="lab">我的今天</div><div class="today" id="today"></div></div>
+    <div class="seg thm" role="group" aria-label="畫面顏色"><button type="button" data-th="light">淺色</button><button type="button" data-th="dark">深色</button></div>
+    <script>(function(){var g=document.querySelector('.thm'),r=document.documentElement;function up(){var t=r.getAttribute('data-theme');g.querySelectorAll('button').forEach(function(b){b.setAttribute('aria-pressed',String(b.dataset.th===t))})}g.addEventListener('click',function(e){var b=e.target.closest('button');if(!b)return;r.setAttribute('data-theme',b.dataset.th);try{localStorage.setItem('gt-theme',b.dataset.th)}catch(_){}up()});up()})()</script>
     <div class="me"><div class="av" id="meAv">?</div><div style="min-width:0"><small class="muted" style="font-size:11px;display:block">我是</small><select id="meSel" aria-label="選擇我是哪位成員"></select></div></div>
    </aside>
    <main id="main">
