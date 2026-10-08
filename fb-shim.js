@@ -59,7 +59,7 @@ auth.onAuthStateChanged(async u => {
   isAdmin = (ac.admins || []).map(lc).includes(em);
   isMember = isAdmin || (ac.emails || []).map(lc).includes(em);
   if (!isMember) { gate('沒有使用權限', '<span class="em">' + esc(em) + '</span><br>這個帳號還不在成員名單裡，請管理者把這個 email 加進後台的「登入名單」。', [['換一個帳號', logout, true]]); return; }
-  window.FB_EMAIL = em; hideGate(); readyFn();
+  window.FB_EMAIL = em; window.FB_NAME = u.displayName || ''; hideGate(); readyFn();
   // 清掉一天以上沒更新的線上紀錄
   fs.collection('presence').where('at', '<', Date.now() - 864e5).get().then(s => s.forEach(d => d.ref.delete().catch(() => {}))).catch(() => {});
 });

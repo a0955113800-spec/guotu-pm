@@ -56,7 +56,7 @@ A.person = id => S.people.find(p => p.id === id);
 A.pname = id => { const p = A.person(id); return p ? p.name : ''; };
 // 用 Google 帳號登入時，依成員表的 email 自動對到「我是誰」；對不到才用手選
 A.meAuto = () => { const em = window.FB_EMAIL; const p = em && S.people.find(x => String(x.email || '').trim().toLowerCase() === em); return p ? p.id : ''; };
-A.meId = () => { const a = A.meAuto(); if (a) return a; try { return localStorage.getItem('gt-me') || ''; } catch (_) { return ''; } };
+A.meId = () => { const a = A.meAuto(); if (a || window.FB_EMAIL) return a; try { return localStorage.getItem('gt-me') || ''; } catch (_) { return ''; } };
 A.setMe = id => { try { localStorage.setItem('gt-me', id); } catch (_) {} };
 const PALETTE = ['#e4f1fb', '#e2f3ef', '#fbe9e6', '#efebf7', '#f1eee7', '#fbf1d6', '#e7f3ea', '#f6e6ef'];
 A.pcolor = id => { const i = S.people.findIndex(p => p.id === id); return i < 0 ? 'var(--chip)' : PALETTE[i % PALETTE.length]; };
@@ -194,8 +194,11 @@ A.renderNav = function () {
     nav.append(b);
   });
   const sel = A.$('#meSel'); const me = A.meId(); sel.replaceChildren(h('option', { value: '' }, '（請選擇）'), ...S.people.map(p => h('option', { value: p.id, selected: p.id === me ? true : null }, p.name)));
-  const auto = !!A.meAuto(); let mn = A.$('#meName'); if (!mn) { mn = h('b', { id: 'meName', style: 'display:block;font-size:13px;font-weight:500;padding:2px 0' }); sel.after(mn); }
-  sel.style.display = auto ? 'none' : ''; mn.style.display = auto ? '' : 'none'; mn.textContent = auto ? A.pname(me) : '';
+  // 用 Google 帳號登入的版本不需要手選：直接顯示登入者，另附登出
+  const auto = !!window.FB_EMAIL; let mn = A.$('#meName'); if (!mn) { mn = h('b', { id: 'meName', style: 'display:block;font-size:13px;font-weight:500;padding:2px 0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:140px' }); sel.after(mn); }
+  sel.style.display = auto ? 'none' : ''; mn.style.display = auto ? 'block' : 'none';
+  if (auto) { mn.textContent = (me && A.pname(me)) || window.FB_NAME || window.FB_EMAIL; mn.title = window.FB_EMAIL + (me ? '' : '（後台成員表填上這個 email，就會對到你的工項）');
+    if (!A.$('#meOut')) mn.after(h('button', { id: 'meOut', type: 'button', class: 'melo', onclick: () => window.FB_LOGOUT && window.FB_LOGOUT() }, '登出')); }
   const av = A.$('#meAv'); av.replaceWith(Object.assign(A.avatar(me), { id: 'meAv' }));
 };
 A.renderOnline = function () {
