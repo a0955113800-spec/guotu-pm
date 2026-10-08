@@ -457,11 +457,27 @@ tr:last-child td{border-bottom:0}
 .note{display:flex;gap:10px;align-items:flex-start;padding:12px 12px 12px 14px;border-radius:16px;background:var(--panel);color:var(--ink);font-size:13px;line-height:1.55;box-shadow:0 0 0 1px var(--hair-2),0 14px 30px -14px rgba(0,0,0,.4);animation:noteIn .25s var(--ease)}
 .note.go{cursor:pointer}.note.go:hover{box-shadow:0 0 0 1px var(--teal),0 14px 30px -14px rgba(0,0,0,.4)}
 .note small{display:block;color:var(--muted);font-size:11.5px;margin-top:2px}
-.note .nav0{flex:none;width:28px;height:28px;border-radius:50%;display:grid;place-items:center;background:var(--teal-soft);color:var(--teal-ink);font-weight:600;font-size:13px}
+.note .nav0,.bellpop .nav0{flex:none;width:28px;height:28px;border-radius:50%;display:grid;place-items:center;background:var(--teal-soft);color:var(--teal-ink);font-weight:600;font-size:13px}
 .note .x{all:unset;cursor:pointer;margin-left:auto;color:var(--muted);font-size:16px;line-height:1;padding:2px 4px}
 .note.out{opacity:0;transform:translateX(12px);transition:.2s}
 @keyframes noteIn{from{transform:translateY(10px);opacity:0}}
 @media (max-width:640px){.notes{top:12px;bottom:auto;right:12px;width:calc(100vw - 24px)}}
+.bell{position:relative;color:var(--ink-2)}.bell svg{width:18px;height:18px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+.bell b{position:absolute;top:-4px;right:-4px;min-width:18px;height:18px;padding:0 5px;box-sizing:border-box;border-radius:999px;background:var(--bad);color:#fff;font:600 10.5px/18px var(--num);text-align:center}
+.bell b[hidden]{display:none}
+.bellpop{position:fixed;z-index:66;width:min(380px,calc(100vw - 24px));max-height:min(70vh,560px);display:flex;flex-direction:column;background:var(--panel);color:var(--ink);border-radius:18px;box-shadow:0 0 0 1px var(--hair-2),0 24px 48px -20px rgba(0,0,0,.45);overflow:hidden;animation:noteIn .2s var(--ease)}
+.bellpop .bh2{display:flex;align-items:baseline;justify-content:space-between;padding:14px 16px 10px;border-bottom:1px solid var(--hair)}.bellpop .bh2 b{font-size:14px;font-weight:600}.bellpop .bh2 small{color:var(--muted);font-size:12px}
+.bellpop .bl{overflow-y:auto;padding:6px}
+.bellpop .bi{all:unset;box-sizing:border-box;width:100%;cursor:pointer;display:flex;gap:10px;align-items:flex-start;padding:10px;border-radius:12px;font-size:13px;line-height:1.5;color:var(--ink)}
+.bellpop .bi:hover{background:var(--hover)}.bellpop .bi.un{background:color-mix(in srgb,var(--teal) 8%,var(--panel))}
+.bellpop .bt{min-width:0;flex:1}.bellpop .bt small{display:block;color:var(--muted);font-size:11.5px}
+.bellpop .dot{flex:none;width:8px;height:8px;border-radius:50%;background:var(--teal);margin-top:7px}
+.kc-src{opacity:.3}
+.kc-ghost{position:fixed;left:0;top:0;z-index:80;pointer-events:none;box-shadow:0 0 0 1px var(--hair),0 22px 44px -14px rgba(0,0,0,.4)!important}
+.kb-dragging,.kb-dragging *{cursor:grabbing!important;user-select:none}
+.kb-empty{border:1.5px dashed var(--hair-2);border-radius:14px;padding:18px 10px;text-align:center;color:var(--muted);font-size:12.5px}
+.kb-tip{margin:14px 22px 0;font-size:12.5px;color:var(--muted)}
+.col.over{background:color-mix(in srgb,var(--teal) 7%,var(--side))}
 @media (max-width: 1100px){.hc{grid-template-columns:1fr}.hm{border-left:0;border-top:1px solid var(--hair);min-height:420px}.grid2{grid-template-columns:1fr}}
 @media (max-width: 860px){
   .stage{padding-inline:10px}
@@ -497,6 +513,7 @@ tr:last-child td{border-bottom:0}
      <button class="search" id="openSearch" type="button"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="6.5"/><path d="M20 20l-4-4"/></svg>搜尋會議紀錄、議題、公文<kbd>Ctrl K</kbd></button>
      <div class="sp"></div>
      <div class="online" id="online"></div>
+     <button class="ib bell" id="bellBtn" type="button" aria-label="最近更新"><svg viewBox="0 0 24 24"><path d="M6 16v-5a6 6 0 0 1 12 0v5l1.5 2h-15z"/><path d="M10 20.5a2 2 0 0 0 4 0"/></svg><b id="bellN" hidden></b></button>
      <span class="conn" id="conn"><i></i><span>連線中</span></span>
      <button class="btn pri" id="addBtn" type="button">新增<span><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg></span></button>
     </div>

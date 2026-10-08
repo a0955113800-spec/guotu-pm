@@ -254,7 +254,7 @@ A.pages.schedule = function (frag) {
   const ts = filteredTasks();
   let body;
   if (!S.tasks.length) body = emptyBox('還沒有工項', '從右上角「新增」或這頁的「新增工項」開始；會議決議也可以一鍵轉成工項。', S.canWrite ? h('button', { class: 'btn sm', type: 'button', onclick: () => A.newTask() }, '新增工項') : null);
-  else if (S.schedView === 'board') body = boardView(ts);
+  else if (S.schedView === 'board') body = boardView();
   else if (S.schedView === 'gantt') body = ganttView(ts);
   else body = listView(ts);
   frag.append(tb, card(h('div'), body));
@@ -275,27 +275,58 @@ function listView(ts) {
   if (!tb.children.length) return emptyBox('沒有符合條件的工項', '調整上面的篩選條件看看。');
   return h('div', { class: 'tbl' }, h('table', null, h('thead', null, h('tr', null, h('th'), h('th', null, '工項'), h('th', null, '負責'), h('th', null, '期程'), h('th', null, '狀態'), h('th'))), tb));
 }
-function boardView(ts) {
+function boardView() {
+  // 看板的欄位就是狀態，所以不套「狀態」篩選，只套負責人與關鍵字
+  const f = S.f, ts = S.tasks.filter(t => (!f.owner || (t.owners || []).includes(f.owner)) && (!f.q || (t.title || '').includes(f.q) || (t.note || '').includes(f.q)));
   const kb = h('div', { class: 'kb' });
   STATUS.forEach(s => {
     const col = h('div', { class: 'col', 'data-st': s });
-    const items = ts.filter(t => (t.status || '未開始') === s);
+    const items = ts.filter(t => (t.status || '未開始') === s).sort((a, b) => ((a.due || '9') < (b.due || '9') ? -1 : 1));
     col.append(h('h3', null, s, h('small', null, items.length)));
-    items.forEach(t => { const c = h('button', { class: 'kc', type: 'button', draggable: S.canWrite ? 'true' : 'false', onclick: () => A.openDrawer('task', t.id) }, h('b', null, t.title, editDot('task:' + t.id)),
-      h('div', { class: 'meta2' }, (t.owners || []).map(o => A.avatar(o, 22)), t.due ? h('span', { class: t.due < today() && s !== '完成' ? 'tag t-bad' : 'tag' }, A.md(t.due)) : '', h('span', null, t.cat || '')));
-      c.addEventListener('dragstart', e => { e.dataTransfer.setData('text/plain', t.id); }); col.append(c); });
-    col.addEventListener('dragover', e => { e.preventDefault(); col.classList.add('over'); });
-    col.addEventListener('dragleave', () => col.classList.remove('over'));
-    col.addEventListener('drop', e => { e.preventDefault(); col.classList.remove('over'); const id = e.dataTransfer.getData('text/plain'); const t = A.byId('tasks', id); if (t && t.status !== s) A.patch('tasks', id, { status: s }); });
+    items.forEach(t => {
+      const c = h('button', { class: 'kc', type: 'button', 'data-id': t.id }, h('b', null, t.title, editDot('task:' + t.id)),
+        h('div', { class: 'meta2' }, (t.owners || []).map(o => A.avatar(o, 22)), t.due ? h('span', { class: t.due < today() && s !== '完成' ? 'tag t-bad' : 'tag' }, A.md(t.due)) : '', h('span', null, t.cat || '')));
+      c.addEventListener('click', () => { if (c.dataset.dragged) { delete c.dataset.dragged; return; } A.openDrawer('task', t.id); });
+      if (S.canWrite) kbDrag(c, t);
+      col.append(c);
+    });
+    if (!items.length) col.append(h('div', { class: 'kb-empty' }, S.canWrite ? '把卡片拖到這裡' : '沒有工項'));
     kb.append(col);
   });
-  return kb;
+  return h('div', null, S.canWrite ? h('p', { class: 'kb-tip' }, '按住卡片拖到其他欄，放開就會更新狀態；點一下打開詳細內容。') : '', kb);
 }
-const GX_WD = '日一二三四五六';
-function gxPref(k, d) { try { return localStorage.getItem(k) || d; } catch (_) { return d; } }
-function gxSave(k, v) { try { localStorage.setItem(k, v); } catch (_) {} }
-S.gZoom = gxPref('gt-gz', 'week'); S.gOwn = gxPref('gt-go', '1') === '1';
-S.gFold = new Set(gxPref('gt-gf', '').split('|').filter(Boolean));
+// 用滑鼠拖曳卡片（不靠瀏覽器內建拖放，避免重繪時中斷）；手機請點開卡片改狀態
+function kbDrag(card, t) {
+  card.addEventListener('pointerdown', e => {
+    if (e.button !== 0 || e.pointerType === 'touch') return;
+    const sx = e.clientX, sy = e.clientY; let ghost = null, over = null, ox = 0, oy = 0;
+    const move = ev => {
+      if (!ghost) {
+        if (Math.hypot(ev.clientX - sx, ev.clientY - sy) < 6) return;
+        const r = card.getBoundingClientRect(); ox = sx - r.left; oy = sy - r.top;
+        ghost = card.cloneNode(true); ghost.classList.add('kc-ghost'); ghost.style.width = r.width + 'px'; document.body.append(ghost);
+        card.classList.add('kc-src'); S.dragging = true; document.body.classList.add('kb-dragging');
+      }
+      ev.preventDefault();
+      ghost.style.transform = 'translate(' + (ev.clientX - ox) + 'px,' + (ev.clientY - oy) + 'px) rotate(1.5deg)';
+      const el = document.elementFromPoint(ev.clientX, ev.clientY), col = el && el.closest('.kb .col');
+      if (col !== over) { if (over) over.classList.remove('over'); over = col; if (over) over.classList.add('over'); }
+      if (ev.clientY < 70) window.scrollBy(0, -14); else if (ev.clientY > innerHeight - 70) window.scrollBy(0, 14);
+    };
+    const end = ev => {
+      const dragged = !!ghost, target = over;
+      removeEventListener('pointermove', move); removeEventListener('pointerup', end); removeEventListener('pointercancel', end);
+      if (ghost) ghost.remove(); if (over) over.classList.remove('over'); card.classList.remove('kc-src'); document.body.classList.remove('kb-dragging'); S.dragging = false;
+      if (!dragged) return;
+      card.dataset.dragged = '1'; setTimeout(() => { delete card.dataset.dragged; }, 50);
+      const st = target && target.dataset.st;
+      if (ev.type === 'pointerup' && st && st !== (t.status || '未開始')) { A.patch('tasks', t.id, { status: st }); t.status = st; }
+      if (A.pendingRender) A.pendingRender = false;
+      A.render();
+    };
+    addEventListener('pointermove', move); addEventListener('pointerup', end); addEventListener('pointercancel', end);
+  });
+}
 function ganttView(ts) {
   const td = today(), mob = window.innerWidth < 700, LW = mob ? 130 : 250, zoom = S.gZoom;
   let DW = zoom === 'day' ? (mob ? 22 : 26) : zoom === 'week' ? (mob ? 7 : 9) : (mob ? 3 : 3.4);
@@ -520,10 +551,11 @@ A.pages.admin = function (frag) {
   const pt = h('tbody');
   S.people.forEach(p => pt.append(h('tr', null, h('td', null, A.avatar(p.id, 28)), h('td', null, A.inp(p.name, v => A.patch('people', p.id, { name: v }), { sm: true, ro: !S.canWrite })),
     h('td', null, A.inp(p.title, v => A.patch('people', p.id, { title: v }), { sm: true, ro: !S.canWrite, ph: '職稱或分工' })),
+    h('td', null, A.inp(p.email || '', v => A.patch('people', p.id, { email: v.trim().toLowerCase() }), { sm: true, ro: !S.canWrite, ph: 'Google 帳號 email' })),
     h('td', null, A.sel(String(p.share ?? 0), [['1', '整份'], ['0.5', '半份'], ['0', '不參與']], v => A.patch('people', p.id, { share: Number(v) }), { sm: true, ro: !S.canWrite })),
     h('td', null, S.canWrite ? h('button', { class: 'btn sm danger', type: 'button', onclick: () => A.confirm('刪除成員「' + p.name + '」？', '已指派給他的工項會變成未指派。', '刪除', () => A.del('people', p.id), true) }, '刪除') : ''))));
   frag.append(card(chead('成員', '導讀份額：整份＝1、半份＝0.5', S.canWrite ? h('button', { class: 'btn sm', type: 'button', onclick: () => A.prompt('新增成員', '姓名', v => A.put('people', A.newId(), { name: v, title: '', share: 1 })) }, '新增成員') : ''),
-    S.people.length ? h('div', { class: 'tbl', style: 'margin-top:10px' }, h('table', null, h('thead', null, h('tr', null, ['', '姓名', '職稱／分工', '導讀份額', ''].map(x => h('th', null, x)))), pt)) : emptyBox('還沒有成員', '新增成員後，工項、決議、導讀都可以指派給他們。')));
+    S.people.length ? h('div', { class: 'tbl', style: 'margin-top:10px' }, h('table', null, h('thead', null, h('tr', null, ['', '姓名', '職稱／分工', 'Google 帳號', '導讀份額', ''].map(x => h('th', null, x)))), pt)) : emptyBox('還沒有成員', '新增成員後，工項、決議、導讀都可以指派給他們。')));
   // 會議類型與範本
   const T = types().map(t => Object.assign({}, t, { steps: (t.steps || []).map(s => Object.assign({}, s)) }));
   const saveT = () => A.putConfig('templates', { types: T });

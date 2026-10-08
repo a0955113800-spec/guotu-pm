@@ -54,7 +54,9 @@ A.newId = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7)
 A.byId = (coll, id) => S[coll].find(x => x.id === id);
 A.person = id => S.people.find(p => p.id === id);
 A.pname = id => { const p = A.person(id); return p ? p.name : ''; };
-A.meId = () => { try { return localStorage.getItem('gt-me') || ''; } catch (_) { return ''; } };
+// 用 Google 帳號登入時，依成員表的 email 自動對到「我是誰」；對不到才用手選
+A.meAuto = () => { const em = window.FB_EMAIL; const p = em && S.people.find(x => String(x.email || '').trim().toLowerCase() === em); return p ? p.id : ''; };
+A.meId = () => { const a = A.meAuto(); if (a) return a; try { return localStorage.getItem('gt-me') || ''; } catch (_) { return ''; } };
 A.setMe = id => { try { localStorage.setItem('gt-me', id); } catch (_) {} };
 const PALETTE = ['#e4f1fb', '#e2f3ef', '#fbe9e6', '#efebf7', '#f1eee7', '#fbf1d6', '#e7f3ea', '#f6e6ef'];
 A.pcolor = id => { const i = S.people.findIndex(p => p.id === id); return i < 0 ? 'var(--chip)' : PALETTE[i % PALETTE.length]; };
@@ -192,6 +194,8 @@ A.renderNav = function () {
     nav.append(b);
   });
   const sel = A.$('#meSel'); const me = A.meId(); sel.replaceChildren(h('option', { value: '' }, '（請選擇）'), ...S.people.map(p => h('option', { value: p.id, selected: p.id === me ? true : null }, p.name)));
+  const auto = !!A.meAuto(); let mn = A.$('#meName'); if (!mn) { mn = h('b', { id: 'meName', style: 'display:block;font-size:13px;font-weight:500;padding:2px 0' }); sel.after(mn); }
+  sel.style.display = auto ? 'none' : ''; mn.style.display = auto ? '' : 'none'; mn.textContent = auto ? A.pname(me) : '';
   const av = A.$('#meAv'); av.replaceWith(Object.assign(A.avatar(me), { id: 'meAv' }));
 };
 A.renderOnline = function () {
@@ -208,10 +212,10 @@ A.renderOnline = function () {
 };
 A.render = function () {
   if (!A.pages) return;
-  A.renderNav(); A.renderToday && A.renderToday();
+  A.renderNav(); A.renderToday && A.renderToday(); A.renderBell && A.renderBell();
   const v = A.$('#view');
   const keep = document.activeElement && v.contains(document.activeElement) && /INPUT|TEXTAREA|SELECT/.test(document.activeElement.tagName);
-  if (keep) { A.pendingRender = true; return; }
+  if (keep || S.dragging) { A.pendingRender = true; return; }
   const fn = A.pages[S.page] || A.pages.overview;
   const frag = h('div', { style: 'display:flex;flex-direction:column;gap:20px' });
   if (S.demo) frag.append(h('div', { class: 'demo-ribbon' }, '本機預覽：畫面上是示意資料，發佈後會改用共用資料庫。'));
@@ -375,6 +379,47 @@ A.notify = function (txt, who, onOpen) {
   let t = setTimeout(close, 8000);
   card.addEventListener('mouseenter', () => clearTimeout(t)); card.addEventListener('mouseleave', () => { t = setTimeout(close, 3000); });
 };
+
+/* 通知中心：最近 7 天誰改了哪一筆（讀各筆的 updatedAt／updatedBy） */
+const SEEN_K = 'gt-seen';
+const getSeen = () => { try { return localStorage.getItem(SEEN_K) || ''; } catch (_) { return ''; } };
+const setSeen = v => { try { localStorage.setItem(SEEN_K, v); } catch (_) {} };
+if (!getSeen()) setSeen(new Date().toISOString());
+A.recent = function () {
+  const from = new Date(Date.now() - 7 * 864e5).toISOString(), out = [];
+  Object.keys(COLL_LB).forEach(c => (S[c] || []).forEach(d => { if (d.updatedAt && d.updatedAt >= from) out.push({ c, id: d.id, at: d.updatedAt, by: d.updatedBy || null, name: recName(d) }); }));
+  return out.sort((x, y) => (x.at < y.at ? 1 : -1)).slice(0, 60);
+};
+A.renderBell = function () {
+  const n = A.$('#bellN'); if (!n) return;
+  const seen = getSeen(), k = A.recent().filter(x => x.at > seen && x.by && x.by !== S.myUid).length;
+  n.hidden = !k; n.textContent = k > 99 ? '99+' : String(k);
+};
+const ago = iso => { const t = (Date.now() - Date.parse(iso)) / 1000; if (t < 60) return '剛剛'; if (t < 3600) return Math.floor(t / 60) + ' 分鐘前'; if (t < 86400) return Math.floor(t / 3600) + ' 小時前'; const d = new Date(iso); return (d.getMonth() + 1) + '/' + d.getDate() + ' ' + String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0'); };
+A.openBell = async function () {
+  const old = document.getElementById('bellPop'); if (old) { old.remove(); return; }
+  const list = A.recent(), seen = getSeen();
+  await A.profiles([...new Set(list.map(x => x.by).filter(Boolean))]);
+  const pop = h('div', { id: 'bellPop', class: 'bellpop', role: 'dialog', 'aria-label': '最近更新' });
+  const outside = e => { if (!pop.contains(e.target) && !e.target.closest('#bellBtn')) close(); };
+  const esc = e => { if (e.key === 'Escape') close(); };
+  const close = () => { pop.remove(); document.removeEventListener('mousedown', outside, true); document.removeEventListener('keydown', esc); };
+  pop.append(h('div', { class: 'bh2' }, h('b', null, '最近 7 天的更新'), h('small', null, list.length + ' 筆')));
+  const ul = h('div', { class: 'bl' });
+  if (!list.length) ul.append(h('div', { class: 'muted', style: 'padding:22px;text-align:center' }, '最近 7 天沒有更新'));
+  list.forEach(x => {
+    const mine = !!x.by && x.by === S.myUid, who = mine ? '你' : (x.by && A.profName(x.by)) || '有人', unread = !mine && !!x.by && x.at > seen;
+    ul.append(h('button', { type: 'button', class: 'bi' + (unread ? ' un' : ''), onclick: () => { close(); if (KIND[x.c]) A.openDrawer(KIND[x.c], x.id); else if (A.go) A.go('admin'); } },
+      h('span', { class: 'nav0' }, who.slice(0, 1)), h('span', { class: 'bt' }, who + ' 更新了' + COLL_LB[x.c] + '「' + (x.name || '未命名') + '」', h('small', null, ago(x.at))), unread ? h('i', { class: 'dot' }) : ''));
+  });
+  pop.append(ul); document.body.append(pop);
+  const r = A.$('#bellBtn').getBoundingClientRect();
+  pop.style.top = (r.bottom + 8) + 'px'; pop.style.right = Math.max(12, window.innerWidth - r.right) + 'px';
+  setSeen(new Date().toISOString()); A.renderBell();
+  setTimeout(() => { document.addEventListener('mousedown', outside, true); document.addEventListener('keydown', esc); }, 0);
+};
+document.addEventListener('click', e => { if (e.target.closest && e.target.closest('#bellBtn')) A.openBell(); });
+setInterval(() => A.renderBell(), 60000);
 
 A.boot = boot;
 })();
