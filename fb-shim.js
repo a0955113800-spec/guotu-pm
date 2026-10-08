@@ -125,8 +125,7 @@ window.FB_ADMIN = function (frag) {
   const ta1 = h('textarea', { class: 'in', rows: 6, placeholder: '一行一個 email', id: 'fb-emails' }), ta2 = h('textarea', { class: 'in', rows: 3, placeholder: '一行一個 email', id: 'fb-admins' });
   fs.doc('config/access').get().then(s => { const d = s.data() || {}; ta1.value = (d.emails || []).join('\n'); ta2.value = (d.admins || []).join('\n'); }).catch(() => {});
   const parse = ta => [...new Set(ta.value.split(/[\s,;，、]+/).map(lc).filter(x => /@/.test(x)))];
-  const fromPeople = h('button', { class: 'btn sm', type: 'button', onclick: () => { const add = A.S.people.map(p => lc(p.email)).filter(x => /@/.test(x)); if (!add.length) { A.toast('成員表還沒有填 Google 帳號。'); return; } ta1.value = [...new Set(parse(ta1).concat(add))].join('
-'); A.toast('已帶入 ' + add.length + ' 個 email，記得按「儲存名單」。'); } }, '帶入成員表的 email');
+  const fromPeople = h('button', { class: 'btn sm', type: 'button', onclick: () => { const add = A.S.people.map(p => lc(p.email)).filter(x => /@/.test(x)); if (!add.length) { A.toast('成員表還沒有填 Google 帳號。'); return; } ta1.value = [...new Set(parse(ta1).concat(add))].join(String.fromCharCode(10)); A.toast('已帶入 ' + add.length + ' 個 email，記得按「儲存名單」。'); } }, '帶入成員表的 email');
   const save = h('button', { class: 'btn sm', type: 'button', onclick: async () => {
     const admins = parse(ta2); if (!admins.includes(lc(me.email))) admins.push(lc(me.email));
     try { await fs.doc('config/access').set({ emails: parse(ta1), admins }); A.toast('登入名單已儲存。'); } catch (e) { A.toast('儲存失敗：' + ((e && e.message) || '')); } } }, '儲存名單');
