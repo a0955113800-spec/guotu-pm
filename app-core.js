@@ -49,7 +49,7 @@ const S = A.S = {
   people: [], tasks: [], meetings: [], issues: [], letters: [], reviews: [],
   peers: [], page: 'overview', drawer: null
 };
-A.COLLS = ['people', 'tasks', 'meetings', 'issues', 'letters', 'reviews', 'contacts'];
+A.COLLS = ['people', 'tasks', 'meetings', 'issues', 'letters', 'reviews', 'contacts', 'events'];
 A.newId = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
 A.byId = (coll, id) => S[coll].find(x => x.id === id);
 A.person = id => S.people.find(p => p.id === id);
@@ -137,11 +137,11 @@ async function boot() {
     try { const w = await user.can('data.write'); if (w === false) S.canWrite = false; if (w !== null) S.canWriteChecked = true; } catch (_) {}
   }
   let first = 0; const need = A.COLLS.length + 1;
-  const done = () => { first++; if (first >= need && !S.ready) { S.ready = true; setConn('on', '即時同步'); A.schedule(); setTimeout(() => A.brief && A.brief(), 900); } };
+  const done = () => { first++; if (first >= need && !S.ready) { S.ready = true; setConn('on', '即時同步'); A.schedule(); setTimeout(() => A.brief && A.brief(), 900); if (A.fillIssueNames) A.fillIssueNames(); } };
   A.COLLS.forEach(c => {
     let got = false;
     db.collection(c).onSnapshot(snap => { const prev = S[c]; S[c] = snap.docs.map(d => Object.assign({ id: d.id }, d.data())); if (got) A.noteChanges(c, snap, prev); if (!got) { got = true; done(); } A.schedule(); },
-      () => { if (c === 'contacts') { S.contactsErr = true; if (!got) { got = true; done(); } return; } setConn('off', '同步中斷'); A.toast('資料同步中斷，請重新整理頁面。'); });
+      () => { if (c === 'contacts' || c === 'events') { S[c + 'Err'] = true; if (!got) { got = true; done(); } return; } setConn('off', '同步中斷'); A.toast('資料同步中斷，請重新整理頁面。'); });
   });
   let gotCfg = false;
   db.collection('config').onSnapshot(snap => {
@@ -168,6 +168,7 @@ A.PAGES = [
   ['schedule', '時程', '<path d="M4 7h9M4 12h16M4 17h6"/><circle cx="16.5" cy="7" r="2"/><circle cx="13.5" cy="17" r="2"/>'],
   ['meetings', '會議', '<rect x="3.5" y="5" width="17" height="15.5" rx="3"/><path d="M3.5 10h17M8 3v4M16 3v4"/>'],
   ['issues', '議題', '<path d="M12 3l8 4.5-8 4.5-8-4.5z"/><path d="M4 12l8 4.5 8-4.5M4 16.5L12 21l8-4.5"/>'],
+  ['events', '大事紀', '<path d="M5 21V3.5"/><path d="M5 4h12l-2.5 4L17 12H5"/>'],
   ['docs', '文件', '<path d="M6 3.5h8l4 4V20.5H6z"/><path d="M14 3.5v4h4M9 12h6M9 16h4"/>'],
   ['admin', '後台', '<circle cx="12" cy="12" r="3"/><path d="M12 3v2.5M12 18.5V21M3 12h2.5M18.5 12H21M5.6 5.6l1.8 1.8M16.6 16.6l1.8 1.8M5.6 18.4l1.8-1.8M16.6 7.4l1.8-1.8"/>']
 ];
@@ -186,7 +187,7 @@ A.renderShell = function () {
 A.renderNav = function () {
   const nav = A.$('#nav'); nav.replaceChildren();
   const late = A.overdue ? A.overdue().length : 0;
-  const counts = { schedule: S.tasks.length || '', meetings: A.heldCount ? A.heldCount() + '/' + A.quotaTotal() : '', issues: S.issues.length || '', docs: '' };
+  const counts = { schedule: S.tasks.length || '', meetings: A.heldCount ? A.heldCount() + '/' + A.quotaTotal() : '', issues: S.issues.length || '', events: (S.events || []).length || '', docs: '' };
   A.PAGES.forEach(([k, label, d]) => {
     const b = h('button', { type: 'button', 'aria-current': S.page === k ? 'page' : null, onclick: () => A.go(k) }, A.icon(d), label);
     if (k === 'overview' && late) b.append(h('span', { class: 'ct r' }, late));
@@ -299,6 +300,8 @@ A.openSearch = function () {
   const box = h('div', { class: 'sr', onclick: e => { if (e.target === box) box.remove(); } });
   const inp = h('input', { placeholder: '輸入關鍵字：會議、決議、議題、公文、工項…', id: 'search-in', 'aria-label': '搜尋' });
   const list = h('div', { class: 'srl' });
+  // 會議紀錄全文平常不載入，打開搜尋時才讀一次
+  if (!A.minAll && !A.minAllLoad) { A.minAllLoad = true; A.qAll('minutes').then(l => { A.minAll = l; if (document.body.contains(list)) run(); }).catch(() => { A.minAllLoad = false; }); }
   const run = () => {
     const q = inp.value.trim().toLowerCase(); list.replaceChildren(); if (!q) { list.append(h('div', { class: 'empty' }, '可以搜尋會議紀錄的摘要與決議、議題導讀內容、公文主旨。')); return; }
     const hit = (t) => t && String(t).toLowerCase().includes(q);
@@ -307,6 +310,9 @@ A.openSearch = function () {
     S.issues.forEach(i => { const nt = Object.values(i.notes || {}).join(' '); if (hit(i.name) || hit(nt) || hit('議題 ' + i.no)) res.push(['議題', '議題 ' + i.no + (i.name ? '　' + i.name : ''), nt.slice(0, 80), () => A.openDrawer('issue', i.id)]); });
     S.tasks.forEach(t => { if (hit(t.title) || hit(t.note)) res.push(['工項', t.title, t.note || '', () => A.openDrawer('task', t.id)]); });
     S.letters.forEach(l => { if (hit(l.subject) || hit(l.no)) res.push(['公文', l.subject || l.no, (l.kind || '') + ' ' + (l.no || ''), () => A.openDrawer('letter', l.id)]); });
+    const snip = s => { const k = s.toLowerCase().indexOf(q); return (k > 24 ? '…' : '') + s.slice(Math.max(0, k - 24), k + 48) + (k + 48 < s.length ? '…' : ''); };
+    (A.minAll || []).forEach(v => { const p = (v.paras || []).find(x => hit(x)); if (!p) return; const mt = A.byId('meetings', v.meeting); res.push(['會議紀錄', (mt ? mt.title || '會議' : '會議') + '．第 ' + v.ver + ' 版', snip(p), () => A.viewMinutes(mt || { id: v.meeting }, v.ver, 'full')]); });
+    (S.events || []).forEach(e => { if (hit(e.title) || hit(e.detail)) res.push(['大事紀', e.title || '', (e.date ? A.md(e.date) + '　' : '') + (e.detail || '').slice(0, 40), () => A.openDrawer('event', e.id)]); });
     (S.contacts || []).forEach(c => { if (hit(c.name) || hit(c.org) || hit(c.note)) res.push(['聯絡人', c.name || '', [c.org, c.title, c.phone].filter(Boolean).join('．'), () => A.openDrawer('contact', c.id)]); });
     if (!res.length) list.append(h('div', { class: 'empty' }, '找不到「' + inp.value.trim() + '」。'));
     res.slice(0, 40).forEach(([k, t, sub, fn]) => list.append(h('button', { type: 'button', onclick: () => { box.remove(); fn(); } }, h('small', null, k), h('span', null, t, h('em', null, sub)))));
@@ -343,8 +349,8 @@ A.exportCSV = async function (name, rows) {
 const myDel = new Set();
 let savedT = 0;
 A.saved = function () { clearTimeout(savedT); savedT = setTimeout(() => { if (!document.querySelector('.toast')) A.toast('已儲存'); }, 250); };
-const COLL_LB = { tasks: '工項', meetings: '會議', issues: '議題', letters: '公文', reviews: '審查意見', people: '成員', contacts: '聯絡人' };
-const KIND = { tasks: 'task', meetings: 'meeting', issues: 'issue', letters: 'letter', reviews: 'review', contacts: 'contact' };
+const COLL_LB = { tasks: '工項', meetings: '會議', issues: '議題', letters: '公文', reviews: '審查意見', people: '成員', contacts: '聯絡人', events: '大事紀' };
+const KIND = { tasks: 'task', meetings: 'meeting', issues: 'issue', letters: 'letter', reviews: 'review', contacts: 'contact', events: 'event' };
 const recName = d => (d && (d.title || d.name || d.subject || d.no)) || '';
 let noteQ = [], noteT = 0;
 A.noteChanges = function (c, snap, prev) {
@@ -465,6 +471,89 @@ A.makeDocx = async function (filename, bodyXml, o = {}) {
   try { await A.downloads.save({ filename, data: blob }); } catch (e) { if (!e || e.code !== 'declined') A.toast('下載失敗：' + ((e && e.message) || '')); }
 };
 A.money = n => Math.round(Number(n) || 0).toLocaleString('zh-TW');
+
+/* 查詢：只撈需要的資料（會議紀錄全文不常駐，用到才讀） */
+A.qWhere = async function (coll, field, val) {
+  if (!db) return (S[coll] || []).filter(x => x[field] === val).map(x => Object.assign({}, x));
+  const snap = await db.collection(coll).where(field, '==', val).get();
+  return snap.docs.map(d => Object.assign({ id: d.id }, d.data()));
+};
+A.qAll = async function (coll) {
+  if (!db) return (S[coll] || []).map(x => Object.assign({}, x));
+  const snap = await db.collection(coll).get();
+  return snap.docs.map(d => Object.assign({ id: d.id }, d.data()));
+};
+/* 讀出會議紀錄全文：Word（.docx）、PDF、文字檔 → 段落陣列 */
+const PDFJS = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js', PDFW = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+const CJK = '\\u3000-\\u303f\\u3400-\\u9fff\\uff00-\\uffef';
+const cjkSp = new RegExp('([' + CJK + ']) +(?=[' + CJK + '])', 'g');
+const normP = s => String(s || '').replace(/[ 　]/g, ' ').replace(/[ \t]+/g, ' ').replace(cjkSp, '$1').trim();
+A.textToParas = t => String(t || '').replace(/\r/g, '').split(/\n+/).map(normP).filter(Boolean);
+A.extractText = async function (file) {
+  const ext = ((file.name || '').match(/\.(\w+)$/) || [])[1] || '';
+  if (/^docx$/i.test(ext)) {
+    await A.loadScript(JSZIP);
+    const zip = await window.JSZip.loadAsync(file), f = zip.file('word/document.xml');
+    if (!f) throw new Error('讀不到 Word 內容，請確認是 .docx 檔');
+    const xml = new DOMParser().parseFromString(await f.async('string'), 'application/xml');
+    const W = 'http://schemas.openxmlformats.org/wordprocessingml/2006/main', out = [];
+    for (const p of xml.getElementsByTagNameNS(W, 'p')) {
+      let s = '';
+      const walk = n => { for (const c of n.childNodes) { if (c.nodeType !== 1) continue; const ln = c.localName;
+        if (ln === 't') s += c.textContent; else if (ln === 'tab') s += ' '; else if (ln === 'br' || ln === 'cr') s += '\n';
+        else if (ln !== 'p' && ln !== 'delText' && ln !== 'instrText') walk(c); } };
+      walk(p); s.split('\n').forEach(x => { x = normP(x); if (x) out.push(x); });
+    }
+    return out;
+  }
+  if (/^pdf$/i.test(ext)) {
+    await A.loadScript(PDFJS); const lib = window.pdfjsLib; lib.GlobalWorkerOptions.workerSrc = PDFW;
+    const pdf = await lib.getDocument({ data: new Uint8Array(await file.arrayBuffer()) }).promise, lines = [];
+    for (let n = 1; n <= pdf.numPages; n++) { const tc = await (await pdf.getPage(n)).getTextContent(); let cur = '';
+      tc.items.forEach(it => { cur += it.str; if (it.hasEOL) { lines.push(cur); cur = ''; } }); if (cur) lines.push(cur); }
+    // PDF 每行都斷開，依「句尾標點」與「一、（一）1.」這類項目開頭把行接回段落
+    const head = /^([（(]?[一二三四五六七八九十]+[）)、]|[0-9０-９]+[.、．)]|[（(][0-9０-９]+[）)])/, out = []; let buf = '';
+    lines.map(normP).filter(Boolean).forEach(l => { if (buf && head.test(l)) { out.push(buf); buf = ''; } buf += l; if (/[。：；！？」』）)]$/.test(l)) { out.push(buf); buf = ''; } });
+    if (buf) out.push(buf);
+    if (!out.length) throw new Error('這份 PDF 讀不到文字（可能是掃描檔），請改傳 Word 或貼上文字');
+    return out;
+  }
+  if (/^(txt|md)$/i.test(ext)) return A.textToParas(await file.text());
+  if (/^doc$/i.test(ext)) throw new Error('舊版 .doc 讀不到，請在 Word 另存成 .docx 再上傳');
+  throw new Error('只支援 Word（.docx）、PDF 與文字檔');
+};
+/* 比對兩版：先找相同段落（LCS），中間剩下的刪除／新增段落依相似度配成「修改」 */
+const bigr = s => { const m = new Map(); for (let i = 0; i < s.length - 1; i++) { const k = s.substr(i, 2); m.set(k, (m.get(k) || 0) + 1); } return m; };
+const simil = (a, b) => { if (a === b) return 1; if (a.length < 2 || b.length < 2) return 0; const x = bigr(a), y = bigr(b); let c = 0; x.forEach((v, k) => { if (y.has(k)) c += Math.min(v, y.get(k)); }); return 2 * c / (a.length + b.length - 2); };
+const lcsTable = (a, b) => { const n = a.length, m = b.length, L = []; for (let i = 0; i <= n; i++) L.push(new Uint16Array(m + 1));
+  for (let i = n - 1; i >= 0; i--) for (let j = m - 1; j >= 0; j--) L[i][j] = a[i] === b[j] ? L[i + 1][j + 1] + 1 : Math.max(L[i + 1][j], L[i][j + 1]); return L; };
+A.diffParas = function (a, b) {
+  a = a || []; b = b || []; const ops = [];
+  if (a.length * b.length > 4e6) { a.forEach(x => ops.push({ t: 'del', a: x })); b.forEach(x => ops.push({ t: 'add', b: x })); return ops; }
+  const L = lcsTable(a, b); let i = 0, j = 0, dels = [], adds = [];
+  const flush = () => { const used = new Set();
+    dels.forEach(d => { let best = -1, bs = 0.45; adds.forEach((ad, k) => { if (used.has(k)) return; const sc = simil(d, ad); if (sc > bs) { bs = sc; best = k; } });
+      if (best >= 0) { used.add(best); ops.push({ t: 'mod', a: d, b: adds[best] }); } else ops.push({ t: 'del', a: d }); });
+    adds.forEach((ad, k) => { if (!used.has(k)) ops.push({ t: 'add', b: ad }); }); dels = []; adds = []; };
+  while (i < a.length || j < b.length) {
+    if (i < a.length && j < b.length && a[i] === b[j]) { flush(); ops.push({ t: 'same', a: a[i], b: b[j] }); i++; j++; }
+    else if (j < b.length && (i >= a.length || L[i][j + 1] >= L[i + 1][j])) { adds.push(b[j]); j++; }
+    else { dels.push(a[i]); i++; }
+  }
+  flush(); return ops;
+};
+A.diffChars = function (a, b) {
+  if (a.length * b.length > 1.6e6) return [{ t: 'del', s: a }, { t: 'add', s: b }];
+  const L = lcsTable(a, b), out = [], push = (t, c) => { const l = out[out.length - 1]; if (l && l.t === t) l.s += c; else out.push({ t, s: c }); };
+  let i = 0, j = 0;
+  while (i < a.length || j < b.length) {
+    if (i < a.length && j < b.length && a[i] === b[j]) { push('same', a[i]); i++; j++; }
+    else if (j < b.length && (i >= a.length || L[i][j + 1] >= L[i + 1][j])) { push('add', b[j]); j++; }
+    else { push('del', a[i]); i++; }
+  }
+  return out;
+};
+A.diffStats = ops => ({ add: ops.filter(o => o.t === 'add').length, del: ops.filter(o => o.t === 'del').length, mod: ops.filter(o => o.t === 'mod').length });
 
 A.boot = boot;
 })();

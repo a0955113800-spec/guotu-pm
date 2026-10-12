@@ -112,7 +112,7 @@ const api = {
       return out;
     }
   }),
-  assets: () => (isMember ? {
+  assets: () => (isMember && window.FB_STORAGE ? {
     upload: async file => {
       if (file.size > 20 * 1024 * 1024) throw { code: 'too_large' };
       if (!/^(application\/pdf|image\/(png|jpeg|webp))$/.test(file.type)) throw { code: 'unsupported_type' };
