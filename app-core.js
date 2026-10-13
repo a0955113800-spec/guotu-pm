@@ -46,10 +46,10 @@ A.workdaysBetween = (a, b) => { const H = A.holidaySet(); if (a >= b) return 0; 
 const S = A.S = {
   ready: false, demo: false, conn: 'wait', canWrite: true, isAdmin: false, myUid: null,
   project: {}, templates: { types: [] }, calendar: { holidays: [] },
-  people: [], tasks: [], meetings: [], issues: [], letters: [], reviews: [],
+  people: [], tasks: [], meetings: [], issues: [], letters: [], reviews: [], duties: [],
   peers: [], page: 'overview', drawer: null
 };
-A.COLLS = ['people', 'tasks', 'meetings', 'issues', 'letters', 'reviews', 'contacts', 'events'];
+A.COLLS = ['people', 'tasks', 'meetings', 'issues', 'letters', 'reviews', 'contacts', 'events', 'duties'];
 A.newId = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
 A.byId = (coll, id) => S[coll].find(x => x.id === id);
 A.person = id => S.people.find(p => p.id === id);
@@ -122,7 +122,7 @@ async function boot() {
     if (location.protocol === 'file:') {
       await new Promise(r => { const sc = document.createElement('script'); sc.src = 'demo.js'; sc.onload = r; sc.onerror = r; document.head.append(sc); });
       if (window.DEMO) { Object.assign(S, window.DEMO); S.demo = true; S.isAdmin = true;
-        const q = new URLSearchParams(location.search); if (q.get('page')) S.page = q.get('page'); if (q.get('view')) S.schedView = q.get('view'); if (q.get('theme')) document.documentElement.dataset.theme = q.get('theme'); }
+        const q = new URLSearchParams(location.search); if (q.get('page')) S.page = q.get('page'); if (q.get('view')) S.schedView = q.get('view'); if (q.get('theme')) document.documentElement.dataset.theme = q.get('theme'); if (q.get('tab')) S.docTab = q.get('tab'); if (q.get('mv')) S.mView = q.get('mv'); }
     }
     S.ready = true; setConn(S.demo ? 'on' : 'off', S.demo ? '本機預覽' : '未連線'); A.render();
     if (window.DEMO_AFTER) setTimeout(window.DEMO_AFTER, 60);
@@ -141,7 +141,7 @@ async function boot() {
   A.COLLS.forEach(c => {
     let got = false;
     db.collection(c).onSnapshot(snap => { const prev = S[c]; S[c] = snap.docs.map(d => Object.assign({ id: d.id }, d.data())); if (got) A.noteChanges(c, snap, prev); if (!got) { got = true; done(); } A.schedule(); },
-      () => { if (c === 'contacts' || c === 'events') { S[c + 'Err'] = true; if (!got) { got = true; done(); } return; } setConn('off', '同步中斷'); A.toast('資料同步中斷，請重新整理頁面。'); });
+      () => { if (c === 'contacts' || c === 'events' || c === 'duties') { S[c + 'Err'] = true; if (!got) { got = true; done(); } return; } setConn('off', '同步中斷'); A.toast('資料同步中斷，請重新整理頁面。'); });
   });
   let gotCfg = false;
   db.collection('config').onSnapshot(snap => {
@@ -170,6 +170,7 @@ A.PAGES = [
   ['issues', '議題', '<path d="M12 3l8 4.5-8 4.5-8-4.5z"/><path d="M4 12l8 4.5 8-4.5M4 16.5L12 21l8-4.5"/>'],
   ['events', '大事紀', '<path d="M5 21V3.5"/><path d="M5 4h12l-2.5 4L17 12H5"/>'],
   ['docs', '文件', '<path d="M6 3.5h8l4 4V20.5H6z"/><path d="M14 3.5v4h4M9 12h6M9 16h4"/>'],
+  ['contract', '契約', '<path d="M6 3.5h8l4 4V20.5H6z"/><path d="M14 3.5v4h4"/><path d="M9 14.5l2 2 4-4.5"/>'],
   ['admin', '後台', '<circle cx="12" cy="12" r="3"/><path d="M12 3v2.5M12 18.5V21M3 12h2.5M18.5 12H21M5.6 5.6l1.8 1.8M16.6 16.6l1.8 1.8M5.6 18.4l1.8-1.8M16.6 7.4l1.8-1.8"/>']
 ];
 A.go = function (p) { S.page = p; try { localStorage.setItem('gt-page', p); } catch (_) {} A.presence({ page: p }); A.render(); window.scrollTo({ top: 0 }); };
@@ -187,7 +188,7 @@ A.renderShell = function () {
 A.renderNav = function () {
   const nav = A.$('#nav'); nav.replaceChildren();
   const late = A.overdue ? A.overdue().length : 0;
-  const counts = { schedule: S.tasks.length || '', meetings: A.heldCount ? A.heldCount() + '/' + A.quotaTotal() : '', issues: S.issues.length || '', events: (S.events || []).length || '', docs: '' };
+  const counts = { schedule: S.tasks.length || '', meetings: A.heldCount ? A.heldCount() + '/' + A.quotaTotal() : '', issues: S.issues.length || '', events: (S.events || []).length || '', docs: '', contract: A.dutyStats ? (x => x.total ? x.done + '/' + x.total : '')(A.dutyStats()) : '' };
   A.PAGES.forEach(([k, label, d]) => {
     const b = h('button', { type: 'button', 'aria-current': S.page === k ? 'page' : null, onclick: () => A.go(k) }, A.icon(d), label);
     if (k === 'overview' && late) b.append(h('span', { class: 'ct r' }, late));
@@ -314,6 +315,8 @@ A.openSearch = function () {
     (A.minAll || []).forEach(v => { const p = (v.paras || []).find(x => hit(x)); if (!p) return; const mt = A.byId('meetings', v.meeting); res.push(['會議紀錄', (mt ? mt.title || '會議' : '會議') + '．第 ' + v.ver + ' 版', snip(p), () => A.viewMinutes(mt || { id: v.meeting }, v.ver, 'full')]); });
     (S.events || []).forEach(e => { if (hit(e.title) || hit(e.detail)) res.push(['大事紀', e.title || '', (e.date ? A.md(e.date) + '　' : '') + (e.detail || '').slice(0, 40), () => A.openDrawer('event', e.id)]); });
     (S.contacts || []).forEach(c => { if (hit(c.name) || hit(c.org) || hit(c.note)) res.push(['聯絡人', c.name || '', [c.org, c.title, c.phone].filter(Boolean).join('．'), () => A.openDrawer('contact', c.id)]); });
+    S.reviews.forEach(r => { if (hit(r.opinion) || hit(r.response) || hit(r.who)) res.push(['審查意見', (r.report || '審查意見') + (r.who ? '．' + r.who : ''), (r.opinion || '').slice(0, 80), () => A.openDrawer('review', r.id)]); });
+    (S.duties || []).forEach(x => { if (hit(x.name) || hit(x.note) || hit(x.evid)) res.push(['契約事項', x.name || '', [x.qty ? x.qty + (x.unit || '') : '', x.note].filter(Boolean).join('．'), () => A.openDrawer('duty', x.id)]); });
     if (!res.length) list.append(h('div', { class: 'empty' }, '找不到「' + inp.value.trim() + '」。'));
     res.slice(0, 40).forEach(([k, t, sub, fn]) => list.append(h('button', { type: 'button', onclick: () => { box.remove(); fn(); } }, h('small', null, k), h('span', null, t, h('em', null, sub)))));
   };
@@ -332,7 +335,8 @@ A.openAdd = function () {
       h('button', { class: 'btn', type: 'button', onclick: () => pick(A.newTask) }, '工項'),
       h('button', { class: 'btn', type: 'button', onclick: () => pick(A.newMeeting) }, '會議'),
       h('button', { class: 'btn', type: 'button', onclick: () => pick(() => A.newLetter && A.newLetter()) }, '公文'),
-      h('button', { class: 'btn', type: 'button', onclick: () => pick(() => A.newReview && A.newReview()) }, '審查意見')),
+      h('button', { class: 'btn', type: 'button', onclick: () => pick(() => A.newReview && A.newReview()) }, '審查意見'),
+      h('button', { class: 'btn', type: 'button', onclick: () => pick(() => A.newDuty && A.newDuty()) }, '契約事項')),
     h('div', { class: 'act' }, h('button', { class: 'btn', type: 'button', onclick: () => box.remove() }, '取消'))));
   document.body.append(box);
 };
@@ -349,8 +353,8 @@ A.exportCSV = async function (name, rows) {
 const myDel = new Set();
 let savedT = 0;
 A.saved = function () { clearTimeout(savedT); savedT = setTimeout(() => { if (!document.querySelector('.toast')) A.toast('已儲存'); }, 250); };
-const COLL_LB = { tasks: '工項', meetings: '會議', issues: '議題', letters: '公文', reviews: '審查意見', people: '成員', contacts: '聯絡人', events: '大事紀' };
-const KIND = { tasks: 'task', meetings: 'meeting', issues: 'issue', letters: 'letter', reviews: 'review', contacts: 'contact', events: 'event' };
+const COLL_LB = { tasks: '工項', meetings: '會議', issues: '議題', letters: '公文', reviews: '審查意見', people: '成員', contacts: '聯絡人', events: '大事紀', duties: '契約事項' };
+const KIND = { tasks: 'task', meetings: 'meeting', issues: 'issue', letters: 'letter', reviews: 'review', contacts: 'contact', events: 'event', duties: 'duty' };
 const recName = d => (d && (d.title || d.name || d.subject || d.no)) || '';
 let noteQ = [], noteT = 0;
 A.noteChanges = function (c, snap, prev) {
@@ -450,7 +454,7 @@ const wtbl = (widths, rows, o = {}) => {
       const trPr = '<w:trPr>' + (head ? '<w:tblHeader/><w:cantSplit/>' : '') + (!head && o.rowH ? '<w:trHeight w:val="' + o.rowH + '" w:hRule="atLeast"/>' : '') + '</w:trPr>';
       if (r && r.span !== undefined) return '<w:tr>' + trPr + '<w:tc><w:tcPr><w:tcW w:w="' + W + '" w:type="dxa"/><w:gridSpan w:val="' + widths.length + '"/>' + hdr + '</w:tcPr>' + wpara(r.span, { b: true, sz: o.sz, align: 'left', after: 0 }) + '</w:tc></w:tr>';
       return '<w:tr>' + trPr + r.map((c, ci) => { const cc = c !== null && typeof c === 'object' ? c : { t: c };
-        return '<w:tc><w:tcPr><w:tcW w:w="' + widths[ci] + '" w:type="dxa"/>' + (head ? hdr : '') + '<w:vAlign w:val="' + (head || o.rowH ? 'center' : 'top') + '"/></w:tcPr>' + wpara(cc.t, { sz: o.sz, b: head, align: cc.align || (head ? 'center' : 'both'), after: 0 }) + '</w:tc>'; }).join('') + '</w:tr>';
+        return '<w:tc><w:tcPr><w:tcW w:w="' + widths[ci] + '" w:type="dxa"/>' + (head ? hdr : '') + '<w:vAlign w:val="' + (head || o.rowH ? 'center' : 'top') + '"/></w:tcPr>' + String(cc.t == null ? '' : cc.t).split('\n').map(ln => wpara(ln, { sz: o.sz, b: head, align: cc.align || (head ? 'center' : 'both'), after: 0 })).join('') + '</w:tc>'; }).join('') + '</w:tr>';
     }).join('') + '</w:tbl>' + wpara('', { after: 0 });
 };
 A.docx = { para: wpara, tbl: wtbl };
@@ -521,6 +525,42 @@ A.extractText = async function (file) {
   if (/^(txt|md)$/i.test(ext)) return A.textToParas(await file.text());
   if (/^doc$/i.test(ext)) throw new Error('舊版 .doc 讀不到，請在 Word 另存成 .docx 再上傳');
   throw new Error('只支援 Word（.docx）、PDF 與文字檔');
+};
+/* 讀出 Word 表格（審查意見匯入用）：表格→列→儲存格；橫向合併記欄寬，縱向合併沿用上一列的內容 */
+A.docxTables = async function (file) {
+  await A.loadScript(JSZIP);
+  const zip = await window.JSZip.loadAsync(file), f = zip.file('word/document.xml');
+  if (!f) throw new Error('讀不到 Word 內容，請確認是 .docx 檔');
+  const xml = new DOMParser().parseFromString(await f.async('string'), 'application/xml');
+  const W = 'http://schemas.openxmlformats.org/wordprocessingml/2006/main';
+  const kids = (n, ln) => [...n.childNodes].filter(c => c.nodeType === 1 && c.localName === ln);
+  const val = el => el.getAttributeNS(W, 'val') || el.getAttribute('w:val');
+  const ptext = p => { let s = ''; const walk = n => { for (const c of n.childNodes) { if (c.nodeType !== 1) continue; const ln = c.localName;
+    if (ln === 't') s += c.textContent; else if (ln === 'tab') s += ' '; else if (ln === 'br' || ln === 'cr') s += '\n'; else if (ln !== 'delText' && ln !== 'instrText') walk(c); } }; walk(p); return s; };
+  const out = [];
+  for (const tbl of [...xml.getElementsByTagNameNS(W, 'tbl')]) {
+    if (tbl.parentNode && tbl.parentNode.localName === 'tc') continue;
+    const rows = [], above = [];
+    kids(tbl, 'tr').forEach(tr => {
+      const row = []; let col = 0;
+      kids(tr, 'tc').forEach(tc => {
+        const pr = kids(tc, 'tcPr')[0], gs = pr && kids(pr, 'gridSpan')[0], vm = pr && kids(pr, 'vMerge')[0];
+        const span = gs ? Number(val(gs)) || 1 : 1;
+        let t = kids(tc, 'p').map(p => ptext(p).split('\n').map(normP).filter(Boolean).join('\n')).filter(Boolean).join('\n');
+        if (vm && val(vm) !== 'restart') t = above[col] || '';
+        row.push({ t, span, col }); for (let k = 0; k < span; k++) above[col + k] = t; col += span;
+      });
+      rows.push(row);
+    });
+    if (rows.length) out.push(rows);
+  }
+  return out;
+};
+/* 複製文字：先用剪貼簿，不行就選取後複製；都不行請使用者自己選取 */
+A.copyText = async function (text, ta) {
+  try { await navigator.clipboard.writeText(text); A.toast('已複製，可以貼到 LINE 了。'); return true; } catch (_) {}
+  try { if (ta) { ta.focus(); ta.select(); } if (document.execCommand('copy')) { A.toast('已複製，可以貼到 LINE 了。'); return true; } } catch (_) {}
+  A.toast('這個瀏覽器不允許自動複製，請直接選取文字複製（手機長按）。'); return false;
 };
 /* 比對兩版：先找相同段落（LCS），中間剩下的刪除／新增段落依相似度配成「修改」 */
 const bigr = s => { const m = new Map(); for (let i = 0; i < s.length - 1; i++) { const k = s.substr(i, 2); m.set(k, (m.get(k) || 0) + 1); } return m; };

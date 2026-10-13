@@ -48,6 +48,7 @@ A.overdue = function () {
     ((m.minutes || {}).decisions || []).forEach(d => { if (d.due && d.due < td && !d.done) out.push({ label: '決議：' + d.text, due: d.due, open: () => A.openDrawer('meeting', m.id) }); }); });
   S.meetings.forEach(m => { if (!held(m)) return; ((m.minutes || {}).decisions || []).forEach(d => { if (d.due && d.due < td && !d.done && !out.some(o => o.label === '決議：' + d.text)) out.push({ label: '決議：' + d.text, due: d.due, open: () => A.openDrawer('meeting', m.id) }); }); });
   S.issues.forEach(i => { if (i.summaryDue && i.summaryDue < td && (i.status === '未開始' || i.status === '閱讀中' || !i.status)) out.push({ label: '議題 ' + i.no + ' 導讀摘要', due: i.summaryDue, open: () => A.openDrawer('issue', i.id) }); });
+  (S.duties || []).forEach(x => { const due = dutyDue(x); if (due && due < td && !dutyDone(x)) out.push({ label: '契約：' + (x.name || ''), due, open: () => A.openDrawer('duty', x.id) }); });
   return out.sort((a, b) => (a.due < b.due ? -1 : 1));
 };
 const lateTxt = due => { const n = A.diff(today(), due); return n > 0 ? '逾期 ' + n + ' 天' : ''; };
@@ -61,6 +62,7 @@ A.myItems = function (days) {
   S.issues.forEach(i => { if (i.reader === me && i.summaryDue && i.summaryDue <= lim && !['摘要完成', '已導讀'].includes(i.status)) items.push({ t: '議題 ' + i.no + ' 導讀摘要', due: i.summaryDue, kind: '導讀', open: () => A.openDrawer('issue', i.id) }); });
   (S.letters || []).forEach(l => { if (l.owner === me && l.status !== '已辦結' && l.due && l.due <= lim) items.push({ t: '公文：' + (l.subject || l.no || '未填主旨'), due: l.due, kind: '公文', open: () => A.openDrawer('letter', l.id) }); });
   S.meetings.forEach(m => ((m.minutes || {}).decisions || []).forEach(d => { if (d.owner === me && !d.done && d.due && d.due <= lim) items.push({ t: d.text, due: d.due, kind: '決議', open: () => A.openDrawer('meeting', m.id) }); }));
+  (S.duties || []).forEach(x => { const due = dutyDue(x); if (x.owner === me && due && due <= lim && !dutyDone(x)) items.push({ t: x.name || '契約事項', due, kind: '契約', open: () => A.openDrawer('duty', x.id) }); });
   return items.sort((a, b) => (a.due < b.due ? -1 : 1));
 };
 A.renderToday = function () {
@@ -227,7 +229,7 @@ A.pages.overview = function (frag) {
     hl.append(h('h1', null, left >= 0 ? '距離' + next.name : next.name + '已逾期'), h('div', { class: 'count' }, h('span', { class: 'n' }, Math.abs(left)), h('span', { class: 'u' }, '天'),
       h('span', { class: 'meta' }, '第 ' + next.day + ' 天．' + A.roc(due) + (next.copies ? '．交 ' + next.copies + ' 份' : ''), h('br'), '核定後請第 ' + (dl.indexOf(next) + 1) + ' 期款 ' + (next.pay || 0) + '%')));
   } else hl.append(h('h1', null, '四期交付皆已核定'));
-  if (start) hl.append(h('p', { class: 'lede' }, '履約第 ' + Math.max(0, dn) + ' 天，共 ' + A.totalDays() + ' 天。未來 7 天有 ' + weekMeet + ' 場會議' + (late.length ? '，' : '。'), late.length ? h('em', null, late.length + ' 項工作逾期') : '', late.length ? '。' : ''), ruler());
+  if (start) hl.append(h('p', { class: 'lede' }, '履約第 ' + Math.max(0, dn) + ' 天，共 ' + A.totalDays() + ' 天。未來 7 天有 ' + weekMeet + ' 場會議' + (late.length ? '，' : '。'), late.length ? h('em', null, late.length + ' 項工作逾期') : '', late.length ? '。' : '', h('button', { class: 'lk', type: 'button', onclick: () => A.lineWeekModal() }, 'LINE 本週提醒')), ruler());
   const pub = S.meetings.filter(m => /公聽/.test((A.typeOf(m.type) || {}).name || ''));
   const pq = (types().find(t => /公聽/.test(t.name)) || {}).quota || 0;
   const hm = h('div', { class: 'hm' }, h('div', { class: 'leg2' }, h('b', null, '公聽會 ' + (pq || pub.length) + ' 場'),
@@ -258,7 +260,7 @@ A.pages.overview = function (frag) {
         c ? h('span', { class: 'tag ' + (c.st === 'late' ? 't-bad' : 't-blue') }, c.name + ' ' + A.md(c.due)) : h('span', { class: 'tag' }, m.status || '規劃中'))); });
   } else prepBody.append(emptyBox('近期沒有排定的會議', '到「會議」頁新增會議並填開會日期，這裡會自動倒推會前作業。', S.canWrite ? h('button', { class: 'btn sm', type: 'button', onclick: A.newMeeting }, '新增會議') : null));
   const risky = S.meetings.filter(m => m.date && m.date >= td && !held(m)).map(m => [m, A.meetRisks(m)]).filter(x => x[1].length).sort((a, b) => (a[0].date < b[0].date ? -1 : 1));
-  if (risky.length) frag.append(card(chead('時程風險', '會前作業來不及、會議太近、撞假日或超過最晚召開日', more('全部會議', () => A.go('meetings'))), h('div', { style: 'margin-top:8px' }, risky.map(([m, rs]) => h('button', { class: 'rowx', type: 'button', onclick: () => A.openDrawer('meeting', m.id) }, h('span', { class: 'dd' }, A.md(m.date) + ' ' + A.wd(m.date)), h('span', { style: 'min-width:0' }, h('b', null, m.title || '會議'), riskList(rs)), riskTag(rs))))));
+  if (risky.length) frag.append(card(chead('時程風險', '會前作業來不及、會議太近、撞假日或超過最晚召開日', more('全部會議', () => A.go('meetings'))), h('div', { style: 'margin-top:8px' }, risky.map(([m, rs]) => h('button', { class: 'rowx rkrow', type: 'button', onclick: () => A.openDrawer('meeting', m.id) }, h('span', { class: 'dd' }, A.md(m.date) + ' ' + A.wd(m.date)), h('span', { style: 'min-width:0' }, h('b', null, m.title || '會議'), riskList(rs)), riskTag(rs))))));
   frag.append(h('div', { class: 'grid2' },
     card(chead('會前作業', '依開會日倒推', more('全部會議', () => A.go('meetings'))), prepBody),
     card(chead('會議場次', null, h('span', { class: 'big' }, A.heldCount(), h('small', null, ' / ' + A.quotaTotal()))), meetingMatrix())));
@@ -314,7 +316,7 @@ function listView(ts) {
     rows.forEach(t => { const late = t.due && t.due < td && t.status !== '完成';
       const chk = h('button', { class: 'chk' + (t.status === '完成' ? ' on' : ''), type: 'button', 'aria-label': '標記完成', onclick: e => { e.stopPropagation(); if (S.canWrite) A.patch('tasks', t.id, { status: t.status === '完成' ? '進行中' : '完成' }); } });
       tb.append(h('tr', { class: 'click', onclick: () => A.openDrawer('task', t.id) }, h('td', { style: 'width:44px' }, chk),
-        h('td', null, h('span', { class: t.status === '完成' ? 'done-t' : null }, t.title), t.crit ? h('span', { class: 'tag t-bad', style: 'margin-left:8px' }, '關鍵') : '', t.status !== '完成' && A.depRisk(t).length ? h('span', { class: 'tag t-warn', style: 'margin-left:8px', title: '前置延誤：' + A.depRisk(t).join('、') }, '前置延誤') : '', editDot('task:' + t.id),
+        h('td', { class: 'mm1' }, h('span', { class: t.status === '完成' ? 'done-t' : null }, t.title), t.crit ? h('span', { class: 'tag t-bad', style: 'margin-left:8px' }, '關鍵') : '', t.status !== '完成' && A.depRisk(t).length ? h('span', { class: 'tag t-warn', style: 'margin-left:8px', title: '前置延誤：' + A.depRisk(t).join('、') }, '前置延誤') : '', editDot('task:' + t.id),
           (t.deps || []).length ? h('small', { class: 'deps' }, '前置：' + t.deps.map(d => (A.byId('tasks', d) || {}).title).filter(Boolean).join('、')) : ''),
         h('td', null, h('div', { style: 'display:flex;gap:4px' }, (t.owners || []).map(o => A.avatar(o, 26)))),
         h('td', { class: 'num', style: 'white-space:nowrap' }, (t.start ? A.md(t.start) + ' – ' : '') + A.md(t.due)),
@@ -322,7 +324,7 @@ function listView(ts) {
     });
   });
   if (!tb.children.length) return emptyBox('沒有符合條件的工項', '調整上面的篩選條件看看。');
-  return h('div', { class: 'tbl' }, h('table', null, h('thead', null, h('tr', null, h('th'), h('th', null, '工項'), h('th', null, '負責'), h('th', null, '期程'), h('th', null, '狀態'), h('th'))), tb));
+  return h('div', { class: 'tbl mc' }, h('table', null, h('thead', null, h('tr', null, h('th'), h('th', null, '工項'), h('th', null, '負責'), h('th', null, '期程'), h('th', null, '狀態'), h('th'))), tb));
 }
 function boardView() {
   // 看板的欄位就是狀態，所以不套「狀態」篩選，只套負責人與關鍵字
@@ -562,10 +564,16 @@ A.changeMeetingDate = function (m, nd) {
 };
 
 A.pages.meetings = function (frag) {
-  frag.append(h('div', { class: 'page-h' }, h('div', null, h('h1', null, '會議'), h('p', null, '每場會議從會前準備、開會到上傳紀錄都在同一張卡片裡；紀錄標上議題，日後可依議題查歷次討論。')),
-    h('div', { class: 'act' }, h('button', { class: 'btn', type: 'button', onclick: exportMeetings }, '匯出 Excel'), S.canWrite ? h('button', { class: 'btn', type: 'button', onclick: () => A.newMeeting() }, '新增會議') : '')));
+  if (!S.mView) { try { S.mView = localStorage.getItem('gt-mv') || 'list'; } catch (_) { S.mView = 'list'; } }
+  const dv = S.mView === 'dec';
+  frag.append(h('div', { class: 'page-h' }, h('div', null, h('h1', null, '會議'), h('p', null, dv ? '所有會議的決議集中追蹤：負責人、期限、辦理情形；議程和進度簡報會自動帶入辦理情形。' : '每場會議從會前準備、開會到上傳紀錄都在同一張卡片裡；紀錄標上議題，日後可依議題查歷次討論。')),
+    h('div', { class: 'act' }, dv ? [h('button', { class: 'btn', type: 'button', onclick: () => A.decisionsDoc() }, '匯出 Word'), h('button', { class: 'btn', type: 'button', onclick: exportDecisions }, '匯出 Excel')]
+      : [h('button', { class: 'btn', type: 'button', onclick: exportMeetings }, '匯出 Excel'), S.canWrite ? h('button', { class: 'btn', type: 'button', onclick: () => A.newMeeting() }, '新增會議') : ''])));
   if (!readyGate(frag)) return;
-  const chips = h('div', { class: 'toolbar' }, h('button', { class: 'btn sm', type: 'button', 'aria-pressed': String(!S.mType), style: !S.mType ? 'background:var(--ink);color:var(--panel)' : '', onclick: () => { S.mType = ''; A.render(); } }, '全部'),
+  const nOpen = allDecisions().filter(x => !x.d.done).length;
+  const mseg = h('div', { class: 'seg', role: 'group', 'aria-label': '檢視方式' }, [['list', '會議列表'], ['dec', '決議列管' + (nOpen ? ' ' + nOpen : '')]].map(([k, t]) => h('button', { type: 'button', 'aria-pressed': String(S.mView === k), onclick: () => { S.mView = k; try { localStorage.setItem('gt-mv', k); } catch (_) {} A.render(); } }, t)));
+  if (dv) { decisionsView(frag, mseg); return; }
+  const chips = h('div', { class: 'toolbar' }, mseg, h('button', { class: 'btn sm', type: 'button', 'aria-pressed': String(!S.mType), style: !S.mType ? 'background:var(--ink);color:var(--panel)' : '', onclick: () => { S.mType = ''; A.render(); } }, '全部'),
     types().map(t => { const ms = S.meetings.filter(m => m.type === t.id); return h('button', { class: 'btn sm', type: 'button', style: S.mType === t.id ? 'background:var(--ink);color:var(--panel)' : '', onclick: () => { S.mType = t.id; A.render(); } }, t.name, h('span', { class: 'muted num' }, ' ' + ms.filter(held).length + (Number(t.quota) ? '/' + t.quota : ''))); }));
   frag.append(chips);
   const td = today(); const list = S.meetings.filter(m => !S.mType || m.type === S.mType);
@@ -613,14 +621,14 @@ A.pages.issues = function (frag) {
   [...S.issues].sort((a, b) => a.no - b.no).forEach(i => {
     const dis = S.meetings.filter(m => (m.issues || []).map(Number).includes(Number(i.no)));
     tb.append(h('tr', { class: 'click', onclick: () => A.openDrawer('issue', i.id) }, h('td', { class: 'num', style: 'width:52px;font-weight:600' }, i.no),
-      h('td', null, i.name || h('span', { class: 'muted' }, '（未填名稱）'), editDot('issue:' + i.id), h('div', { class: 'muted', style: 'font-size:12px' }, i.group || '')),
+      h('td', { class: 'mm1' }, i.name || h('span', { class: 'muted' }, '（未填名稱）'), editDot('issue:' + i.id), h('div', { class: 'muted', style: 'font-size:12px' }, i.group || '')),
       h('td', { class: 'num muted', style: 'white-space:nowrap' }, i.pages ? 'p.' + i.pages[0] + '–' + i.pages[1] : ''),
       S.canWrite ? h('td', { style: 'white-space:nowrap;min-width:120px', onclick: e => e.stopPropagation() }, A.sel(i.reader || '', A.peopleOpts('未分配'), v => A.patch('issues', i.id, { reader: v }), { sm: true, id: 'ir-' + i.id }))
         : h('td', { style: 'white-space:nowrap' }, i.reader ? h('span', { style: 'display:inline-flex;gap:6px;align-items:center' }, A.avatar(i.reader, 24), A.pname(i.reader)) : h('span', { class: 'muted' }, '未分配')),
       h('td', null, stTag(i.status || '未開始'), i.summaryDue && i.summaryDue < td && !['摘要完成', '已導讀'].includes(i.status) ? h('span', { class: 'tag t-bad', style: 'margin-left:6px' }, '摘要逾期') : ''),
       h('td', { class: 'muted', style: 'white-space:nowrap' }, dis.length ? '討論 ' + dis.length + ' 次' : '')));
   });
-  frag.append(card(chead('24 項重要議題', '點一列看導讀內容與歷次討論'), h('div', { class: 'tbl', style: 'margin-top:10px' }, h('table', null, h('thead', null, h('tr', null, h('th', null, '編號'), h('th', null, '議題'), h('th', null, '報告頁碼'), h('th', null, '導讀人'), h('th', null, '狀態'), h('th', null, '討論'))), tb))));
+  frag.append(card(chead('24 項重要議題', '點一列看導讀內容與歷次討論'), h('div', { class: 'tbl mc', style: 'margin-top:10px' }, h('table', null, h('thead', null, h('tr', null, h('th', null, '編號'), h('th', null, '議題'), h('th', null, '報告頁碼'), h('th', null, '導讀人'), h('th', null, '狀態'), h('th', null, '討論'))), tb))));
 };
 // 成大議題案（總結報告第二章）24 項議題的正式名稱；資料庫裡還沒填名稱的會自動補上
 const ISSUE_NAMES = { 1: '國土計畫制度下之使用地類別編定用途', 2: '農業發展地區之土地使用及變更影響', 3: '原住民族土地使用及居住問題', 4: '既有合法土地使用權益保障情形', 5: '土地使用違規查處及檢舉獎勵制度', 6: '國土計畫法罰則執行原則', 7: '國土計畫法申請土地使用方式及與區域計畫法制度之銜接', 8: '海洋資源地區土地使用制度', 9: '確認後續全國國土計畫之國土永續發展目標', 10: '強化全國國土計畫對於直轄市、縣（市）國土計畫之銜接及指導性', 11: '城鄉發展及成長管理計畫之調整方式', 12: '宜維護農地管理策略', 13: '未來發展地區指認原則調整方式', 14: '強化國土功能分區劃設條件、土地使用指導事項與計畫引導間之關聯性及操作方式（含離島地區）', 15: '補充國土功能分區圖公告後，國土保育地區及其分類之檢討調整條件', 16: '補充國土功能分區圖公告後，農業發展地區及其分類之檢討調整條件', 17: '補充國土功能分區圖公告後，城鄉發展地區及其分類之檢討調整條件（含依原獎勵投資條例或原山坡地開發建築管理辦法同意（或許可）案件回歸按目的事業法令管制及其國土功能分區分類檢討調整）', 18: '補充漲價歸公之土地開發衡平機制', 19: '強化目的事業主管機關推動國土復育促進地區策略', 20: '強化各級國土計畫對外溝通及共識形成之機制', 21: '強化全國國土計畫對於鄉村地區計畫之銜接及指導性', 22: '強化部門空間發展策略對土地使用之指導方式', 23: '配合專法調整氣候變遷減緩及調適策略', 24: '處理跨域議題（含都會地區與特定地區）' };
@@ -720,25 +728,28 @@ function autoAllocate() {
 S.docTab = 'letters';
 A.pages.docs = function (frag) {
   frag.append(h('div', { class: 'page-h' }, h('div', null, h('h1', null, '文件'), h('p', null, '公文收發、審查意見回應、通訊錄，以及各場會議上傳的檔案。'))));
+  if (!['letters', 'reviews', 'contacts', 'files'].includes(S.docTab)) S.docTab = 'letters';
   if (!readyGate(frag)) return;
   const seg = h('div', { class: 'seg', role: 'group' }, [['letters', '公文收發'], ['reviews', '審查意見'], ['contacts', '通訊錄'], ['files', '檔案']].map(([k, t]) => h('button', { type: 'button', 'aria-pressed': String(S.docTab === k), onclick: () => { S.docTab = k; A.render(); } }, t)));
-  frag.append(h('div', { class: 'toolbar' }, seg, h('div', { class: 'sp' }), S.docTab === 'letters' && S.canWrite ? h('button', { class: 'btn', type: 'button', onclick: A.newLetter }, '新增公文') : '', S.docTab === 'reviews' && S.canWrite ? h('button', { class: 'btn', type: 'button', onclick: A.newReview }, '新增審查意見') : '',
-    S.docTab === 'reviews' ? ['工作計畫書', '期中報告', '期末報告', '總結報告'].filter(rp => S.reviews.some(r => (r.report || '工作計畫書') === rp)).map(rp => h('button', { class: 'btn', type: 'button', onclick: () => A.reviewDoc(rp) }, '下載' + rp + '回應表')) : '',
+  frag.append(h('div', { class: 'toolbar' }, seg, h('div', { class: 'sp' }), S.docTab === 'letters' && S.canWrite ? h('button', { class: 'btn', type: 'button', onclick: A.newLetter }, '新增公文') : '', S.docTab === 'reviews' && S.canWrite ? h('button', { class: 'btn', type: 'button', onclick: () => A.importReviews() }, '匯入審查意見') : '', S.docTab === 'reviews' && S.canWrite ? h('button', { class: 'btn', type: 'button', onclick: A.newReview }, '新增審查意見') : '',
+    S.docTab === 'reviews' ? REPORTS.filter(rp => S.reviews.some(r => (r.report || '工作計畫書') === rp)).map(rp => h('button', { class: 'btn', type: 'button', onclick: () => A.reviewDoc(rp) }, '下載' + rp + '回應表')) : '',
     S.docTab === 'contacts' && S.canWrite && !S.contactsErr ? h('button', { class: 'btn', type: 'button', onclick: A.newContact }, '新增聯絡人') : ''));
   const td = today();
   if (S.docTab === 'letters') {
     if (!S.letters.length) { frag.append(card(h('div'), emptyBox('還沒有公文', '收文或發文都可以記在這裡，填上辦理期限就會出現在逾期提醒。'))); return; }
     const tb = h('tbody'); [...S.letters].sort((a, b) => ((a.date || '') < (b.date || '') ? 1 : -1)).forEach(l => tb.append(h('tr', { class: 'click', onclick: () => A.openDrawer('letter', l.id) },
-      h('td', null, h('span', { class: 'tag ' + (l.kind === '發文' ? 't-blue' : 't-teal') }, l.kind || '收文')), h('td', { class: 'num' }, A.roc(l.date)), h('td', { class: 'num muted' }, l.no || ''), h('td', null, l.subject || ''),
+      h('td', null, h('span', { class: 'tag ' + (l.kind === '發文' ? 't-blue' : 't-teal') }, l.kind || '收文')), h('td', { class: 'num' }, A.roc(l.date)), h('td', { class: 'num muted' }, l.no || ''), h('td', { class: 'mm' }, l.subject || ''),
       h('td', { class: 'num' }, l.due ? A.md(l.due) : ''), h('td', null, A.pname(l.owner)), h('td', null, l.status === '已辦結' ? stTag('已辦結') : l.due && l.due < td ? h('span', { class: 'tag t-bad' }, lateTxt(l.due)) : stTag(l.status || '待辦')))));
-    frag.append(card(h('div'), h('div', { class: 'tbl' }, h('table', null, h('thead', null, h('tr', null, ['類別', '日期', '文號', '主旨', '辦理期限', '承辦', '狀態'].map(x => h('th', null, x)))), tb))));
+    frag.append(card(h('div'), h('div', { class: 'tbl mc' }, h('table', null, h('thead', null, h('tr', null, ['類別', '日期', '文號', '主旨', '辦理期限', '承辦', '狀態'].map(x => h('th', null, x)))), tb))));
   } else if (S.docTab === 'reviews') {
-    if (!S.reviews.length) { frag.append(card(h('div'), emptyBox('還沒有審查意見', '各次報告審查的委員意見逐條記在這裡，寫回應與修正頁次。'))); return; }
+    if (!S.reviews.length) { frag.append(card(h('div'), emptyBox('還沒有審查意見', '各次報告審查的委員意見逐條記在這裡，寫回應與修正頁次。國土署來文的意見可以整份匯入，系統會拆成一條一條。', S.canWrite ? h('button', { class: 'btn sm', type: 'button', onclick: () => A.importReviews() }, '匯入審查意見') : null))); return; }
     const tb = h('tbody');
-    ['工作計畫書', '期中報告', '期末報告', '總結報告'].forEach(rp => { const rs = S.reviews.filter(r => (r.report || '工作計畫書') === rp); if (!rs.length) return;
+    REPORTS.forEach(rp => { const rs = reviewsOf(rp); if (!rs.length) return;
       tb.append(h('tr', { class: 'grp' }, h('td', { colspan: 5 }, rp + '　已回應 ' + rs.filter(r => r.status === '已回應').length + ' / ' + rs.length)));
-      rs.forEach(r => tb.append(h('tr', { class: 'click', onclick: () => A.openDrawer('review', r.id) }, h('td', { class: 'muted' }, r.who || ''), h('td', null, (r.opinion || '').slice(0, 60)), h('td', { class: 'num muted' }, r.pages || ''), h('td', null, A.pname(r.owner)), h('td', null, stTag(r.status || '未回應'))))); });
-    frag.append(card(h('div'), h('div', { class: 'tbl' }, h('table', null, h('thead', null, h('tr', null, ['委員', '意見', '修正頁次', '負責', '狀態'].map(x => h('th', null, x)))), tb))));
+      rs.forEach(r => tb.append(h('tr', { class: 'click', onclick: () => A.openDrawer('review', r.id) }, h('td', { class: 'muted' }, r.who || ''), h('td', { class: 'mm' }, (r.opinion || '').slice(0, 80) + ((r.opinion || '').length > 80 ? '…' : '')), h('td', { class: 'num muted' }, r.pages || ''),
+        S.canWrite ? h('td', { style: 'min-width:110px', onclick: e => e.stopPropagation() }, A.sel(r.owner || '', A.peopleOpts('未指派'), v => A.patch('reviews', r.id, { owner: v }), { sm: true, id: 'ro-' + r.id })) : h('td', null, A.pname(r.owner)),
+        h('td', null, stTag(r.status || '未回應'))))); });
+    frag.append(card(h('div'), h('div', { class: 'tbl mc' }, h('table', null, h('thead', null, h('tr', null, ['委員／單位', '意見', '修正頁次', '負責', '狀態'].map(x => h('th', null, x)))), tb))));
   } else if (S.docTab === 'contacts') {
     const cs = S.contacts || [];
     if (S.contactsErr) { frag.append(card(h('div'), emptyBox('通訊錄還不能使用', '請管理者到 Firebase 更新 Firestore 安全規則（加入 contacts），再重新整理。'))); return; }
@@ -746,8 +757,8 @@ A.pages.docs = function (frag) {
     const nAtt = id => S.meetings.filter(m => (m.attendees || []).includes(id)).length, tb = h('tbody');
     CKINDS.concat([...new Set(cs.map(c => c.kind || '其他'))].filter(k => !CKINDS.includes(k))).forEach(k => { const rows = cs.filter(c => (c.kind || '其他') === k).sort((a, b) => ((a.org || '') + (a.name || '') < (b.org || '') + (b.name || '') ? -1 : 1)); if (!rows.length) return;
       tb.append(h('tr', { class: 'grp' }, h('td', { colspan: 6 }, k + '　' + rows.length)));
-      rows.forEach(c => { const n = nAtt(c.id); tb.append(h('tr', { class: 'click', onclick: () => A.openDrawer('contact', c.id) }, h('td', null, c.name || '（未填姓名）'), h('td', null, c.org || ''), h('td', { class: 'muted' }, c.title || ''), h('td', { class: 'num' }, c.phone || ''), h('td', { class: 'num muted' }, c.email || ''), h('td', { class: 'num' }, n ? n + ' 場' : ''))); }); });
-    frag.append(card(h('div'), h('div', { class: 'tbl' }, h('table', null, h('thead', null, h('tr', null, ['姓名', '單位', '職稱', '電話', 'Email', '出席'].map(x => h('th', null, x)))), tb))));
+      rows.forEach(c => { const n = nAtt(c.id); tb.append(h('tr', { class: 'click', onclick: () => A.openDrawer('contact', c.id) }, h('td', { style: 'font-weight:500' }, c.name || '（未填姓名）'), h('td', null, c.org || ''), h('td', { class: 'muted' }, c.title || ''), h('td', { class: 'num' }, c.phone || ''), h('td', { class: 'num muted' }, c.email || ''), h('td', { class: 'num' }, n ? n + ' 場' : ''))); }); });
+    frag.append(card(h('div'), h('div', { class: 'tbl mc' }, h('table', null, h('thead', null, h('tr', null, ['姓名', '單位', '職稱', '電話', 'Email', '出席'].map(x => h('th', null, x)))), tb))));
   } else {
     const fl = []; S.meetings.forEach(m => ((m.minutes || {}).files || []).forEach(f => fl.push([m, f])));
     const paths = []; S.meetings.forEach(m => ((m.minutes || {}).paths || []).forEach(p => paths.push([m, p])));
@@ -759,7 +770,7 @@ A.pages.docs = function (frag) {
   }
 };
 A.newLetter = async function () { const id = A.newId(); if (await A.put('letters', id, { kind: '收文', date: today(), no: '', subject: '', due: '', owner: A.meId(), status: '待辦', note: '' })) A.openDrawer('letter', id); };
-A.newReview = async function () { const id = A.newId(); if (await A.put('reviews', id, { report: '工作計畫書', who: '', opinion: '', response: '', pages: '', owner: A.meId(), status: '未回應' })) A.openDrawer('review', id); };
+A.newReview = async function () { const id = A.newId(), rp = curReport(); if (await A.put('reviews', id, { report: rp, who: '', opinion: '', response: '', pages: '', owner: A.meId(), status: '未回應', seq: Math.max(0, ...reviewsOf(rp).map(r => Number(r.seq) || 0)) + 1 })) A.openDrawer('review', id); };
 
 /* ---------- 後台 ---------- */
 A.pages.admin = function (frag) {
@@ -825,6 +836,7 @@ A.pages.admin = function (frag) {
     ro ? '' : h('div', { class: 'pad', style: 'display:flex;gap:8px;flex-wrap:wrap;padding-top:0' }, nd, nn, h('button', { class: 'btn sm', type: 'button', onclick: () => { if (!nd.value) return; hol.push({ date: nd.value, name: nn.value.trim() }); saveH(); } }, '加入')))));
   const backup = async () => {
     const out = {}; A.COLLS.forEach(c => { out[c] = (S[c] || []).map(d => Object.assign({}, d)); });
+    try { out.minutes = await A.qAll('minutes'); } catch (_) {}
     out.config = ['project', 'templates', 'calendar'].filter(k => S[k]).map(k => Object.assign({ id: k }, S[k]));
     const n = Object.values(out).reduce((a, v) => a + v.length, 0);
     if (!A.downloads) { A.toast('這個檢視無法下載檔案。'); return; }
@@ -833,7 +845,7 @@ A.pages.admin = function (frag) {
   };
   let lastB = ''; try { lastB = localStorage.getItem('gt-backup') || ''; } catch (_) {}
   frag.append(card(chead('資料備份', lastB ? '這台電腦上次備份：' + A.md(lastB) + (A.diff(today(), lastB) > 14 ? '．已超過兩週，建議再備份一次' : '') : '建議每兩週下載一次，存到公司伺服器'),
-    h('div', { class: 'pad' }, h('p', { class: 'muted', style: 'margin:0 0 10px;font-size:13px;line-height:1.7' }, '把工項、會議（含紀錄與決議）、議題、公文、審查意見、通訊錄、成員與設定全部存成一個 JSON 檔。' + (window.FB_ADMIN ? '需要還原時，由管理者在下方「匯入資料」選這個檔。' : '') + '上傳的 PDF 本身不在備份裡。'),
+    h('div', { class: 'pad' }, h('p', { class: 'muted', style: 'margin:0 0 10px;font-size:13px;line-height:1.7' }, '把工項、會議（含決議與紀錄各版全文）、議題、大事紀、公文、審查意見、通訊錄、契約事項、成員與設定全部存成一個 JSON 檔。' + (window.FB_ADMIN ? '需要還原時，由管理者在下方「匯入資料」選這個檔。' : '') + '上傳的 PDF 本身不在備份裡。'),
       h('button', { class: 'btn sm', type: 'button', onclick: backup }, '下載完整備份'))));
   if (window.FB_ADMIN) window.FB_ADMIN(frag);
 };
@@ -878,10 +890,11 @@ A.drawers.meeting = function (id) {
   const decs = (mi.decisions || []).map(d => Object.assign({}, d));
   const saveD = () => upMin({ decisions: decs });
   const dbox = h('div', { style: 'display:flex;flex-direction:column;gap:8px' });
-  decs.forEach((d, i) => dbox.append(h('div', { class: 'dec' }, h('button', { class: 'chk' + (d.done ? ' on' : ''), type: 'button', 'aria-label': '辦結', onclick: () => { if (!S.canWrite) return; decs[i].done = !d.done; saveD(); } }),
+  decs.forEach((d, i) => dbox.append(h('div', { class: 'dec' }, h('button', { class: 'chk' + (d.done ? ' on' : ''), type: 'button', 'aria-label': '辦結', onclick: () => { if (!S.canWrite) return; decs[i].done = !d.done; decs[i].doneAt = decs[i].done ? today() : ''; saveD(); } }),
     A.inp(d.text, v => { decs[i].text = v; saveD(); }, { sm: true, ph: '決議內容' }), A.sel(d.owner || '', A.peopleOpts(), v => { decs[i].owner = v; saveD(); }, { sm: true }),
     A.inp(d.due, v => { decs[i].due = v; saveD(); }, { sm: true, type: 'date' }),
-    S.canWrite ? h('button', { class: 'ib', type: 'button', 'aria-label': '刪除決議', onclick: () => { decs.splice(i, 1); saveD(); } }, ic('<path d="M6 6l12 12M18 6L6 18"/>')) : '')));
+    S.canWrite ? h('button', { class: 'ib', type: 'button', 'aria-label': '刪除決議', onclick: () => { decs.splice(i, 1); saveD(); } }, ic('<path d="M6 6l12 12M18 6L6 18"/>')) : h('span'),
+    (pr => { pr.classList.add('prog'); return pr; })(A.inp(d.prog, v => { decs[i].prog = v; saveD(); }, { sm: true, ph: '辦理情形（例如：已於 10/20 函送國土署）' })))));
   const decAct = S.canWrite ? h('div', { style: 'display:flex;gap:8px;flex-wrap:wrap' }, h('button', { class: 'btn sm', type: 'button', onclick: () => { decs.push({ text: '', owner: '', due: '', done: false }); saveD(); } }, '新增決議'),
     decs.some(d => d.text && !d.taskId) ? h('button', { class: 'btn sm', type: 'button', onclick: async () => { for (let i = 0; i < decs.length; i++) { const d = decs[i]; if (!d.text || d.taskId) continue; const tid = A.newId(); await A.put('tasks', tid, { title: d.text, cat: '會議', status: d.done ? '完成' : '未開始', owners: d.owner ? [d.owner] : [], start: m.date || '', due: d.due || '', note: '', crit: false, source: { meeting: id } }); decs[i].taskId = tid; } saveD(); A.toast('決議已轉成工項。'); } }, '把決議轉成工項') : '',
     decs.some(d => d.text && !d.eventId) ? h('button', { class: 'btn sm', type: 'button', onclick: async () => { if (S.eventsErr) { A.toast('大事紀還不能使用，請管理者更新 Firestore 規則。'); return; } let n = 0; for (let i = 0; i < decs.length; i++) { const d = decs[i]; if (!d.text || d.eventId) continue; const eid = A.newId(); if (await A.put('events', eid, { date: m.date || today(), title: d.text.slice(0, 60), detail: d.text, src: { meeting: id, kind: 'decision', di: i } })) { decs[i].eventId = eid; n++; } } if (n) { saveD(); A.toast('已把 ' + n + ' 條決議列入大事紀。'); } } }, '把決議列入大事紀') : '') : '';
@@ -916,7 +929,7 @@ A.drawers.meeting = function (id) {
       A.field('出席者', attPicker(m), true),
       A.field('其他出席', A.inp(m.attendNote, v => up({ attendNote: v }), { multi: true, id: 'm-attn', ph: '不在通訊錄的單位或人員，一行一個' }), true),
       h('div', { class: 'doc-btns' }, ['議程', '開會通知單', '簽到表', '會議紀錄'].map(k => h('button', { class: 'btn sm', type: 'button', onclick: () => A.meetDoc(A.byId('meetings', id) || m, k) }, '下載' + k)),
-        h('button', { class: 'btn sm', type: 'button', onclick: () => A.progressPpt(A.byId('meetings', id) || m) }, '下載進度簡報（PPT）'))),
+        h('button', { class: 'btn sm', type: 'button', onclick: () => A.progressPpt(A.byId('meetings', id) || m) }, '下載進度簡報（PPT）'), h('button', { class: 'btn sm', type: 'button', onclick: () => A.lineMeetingModal(A.byId('meetings', id) || m) }, 'LINE 通知文字'))),
     h('div', { class: 'sec' }, h('h4', null, '會議紀錄版本', h('small', null, '每次修正都上傳一版，系統會比對改了哪裡')), minutesBox(m)),
     h('div', { class: 'sec' }, h('h4', null, '紀錄重點', h('small', null, '摘要、決議與檔案')), A.inp(mi.summary, v => upMin({ summary: v }), { multi: true, ph: '重點摘要：討論了什麼、結論是什麼', id: 'm-sum' })),
     h('div', { class: 'sec' }, h('h4', null, '決議事項', h('small', null, '可指定負責人與期限，逾期會出現在提醒')), dbox, decAct),
@@ -1031,7 +1044,7 @@ A.meetDoc = async function (m, kind) {
   await A.makeDocx(base + '_' + kind + '.docx', x);
 };
 A.reviewDoc = async function (rp) {
-  const rs = S.reviews.filter(r => (r.report || '工作計畫書') === rp);
+  const rs = reviewsOf(rp);
   if (!rs.length) { A.toast('「' + rp + '」還沒有審查意見。'); return; }
   const order = []; rs.forEach(r => { const w = r.who || '未填委員／單位'; if (!order.includes(w)) order.push(w); });
   const rows = [['編號', '審查意見', '回應說明', '修正頁次']];
@@ -1374,7 +1387,7 @@ A.agendaXml = function (m) {
   x += P('時間：' + rocLong(m.date) + (m.time ? '　' + m.time : ''), { sz: 12, after: 0 }) + P('地點：' + (m.place || ''), { sz: 12, after: 0 }) + P('主持人：' + (m.chair || ''), { sz: 12, after: 200 });
   x += L('一、主席致詞', '');
   x += L('二、上次會議決議辦理情形', D.pm ? '（' + (D.pm.title || '上次會議') + '，' + A.roc(D.pm.date) + '）' : '（本次為第一次會議）');
-  if (D.decs.length) x += A.docx.tbl([700, 5200, 1600, 2138], [['編號', '決議事項', '負責', '辦理情形']].concat(D.decs.map((d, i) => [{ t: String(i + 1), align: 'center' }, d.text, { t: A.pname(d.owner) || '', align: 'center' }, { t: decState(d) + (d.due ? '（' + A.md(d.due) + '）' : ''), align: 'center' }])), { header: true, sz: 12 });
+  if (D.decs.length) x += A.docx.tbl([700, 4300, 1400, 3238], [['編號', '決議事項', '負責', '辦理情形']].concat(D.decs.map((d, i) => [{ t: String(i + 1), align: 'center' }, d.text, { t: A.pname(d.owner) || '', align: 'center' }, d.prog ? { t: d.prog + '（' + decState(d) + '）', align: 'left' } : { t: decState(d) + (d.due ? '（' + A.md(d.due) + '）' : ''), align: 'center' }])), { header: true, sz: 12 });
   x += L('三、工作進度報告', '（' + A.md(D.from) + '–' + A.md(D.to) + '）');
   x += S2(0, '本期完成 ' + D.done.length + ' 項' + (D.done.length ? '：' + lst(D.done, t => t.title, 8) : '。'));
   x += S2(1, '進行中 ' + D.doing.length + ' 項、逾期 ' + D.late.length + ' 項' + (D.late.length ? '；逾期：' + lst(D.late, t => t.title + '（' + A.md(t.due) + '）', 6) : '。'));
@@ -1418,8 +1431,8 @@ A.progressPpt = async function (m) {
     toc.addText(cnN(i) + '、' + t, { x: 1.2, y: 1.6 + i * 0.66, w: 10.5, h: 0.55, fontFace: F, fontSize: 20, color: INK, margin: 0 }); });
   // 上次決議
   tableSlides('上次會議決議辦理情形' + (D.pm ? '（' + A.md(D.pm.date) + '）' : ''), ['編號', '決議事項', '負責', '期限', '辦理情形'],
-    D.decs.map((d, i) => [{ text: String(i + 1), options: { align: 'center' } }, d.text, { text: A.pname(d.owner) || '', options: { align: 'center' } }, { text: d.due ? A.md(d.due) : '', options: { align: 'center' } }, { text: decState(d), options: { align: 'center', color: d.done ? TEAL : d.due && d.due < today() ? BAD : INK, bold: true } }]),
-    [0.8, 7.3, 1.5, 1.2, 1.53], 9, D.pm ? '上次會議沒有登錄決議。' : '本次為第一次會議，沒有上次決議。');
+    D.decs.map((d, i) => [{ text: String(i + 1), options: { align: 'center' } }, d.text, { text: A.pname(d.owner) || '', options: { align: 'center' } }, { text: d.due ? A.md(d.due) : '', options: { align: 'center' } }, { text: d.prog ? decState(d) + '：' + d.prog : decState(d), options: { align: d.prog ? 'left' : 'center', color: d.done ? TEAL : d.due && d.due < today() ? BAD : INK, bold: !d.prog } }]),
+    [0.7, 5.6, 1.4, 1.2, 3.43], 9, D.pm ? '上次會議沒有登錄決議。' : '本次為第一次會議，沒有上次決議。');
   // 進度總覽
   const ov = base('工作進度總覽（' + A.md(D.from) + '–' + A.md(D.to) + '）');
   [['本期完成', D.done.length, TEAL], ['進行中', D.doing.length, INK], ['逾期', D.late.length, D.late.length ? BAD : INK], ['下階段預定', D.next.length, INK]].forEach(([k, v, col], i) => {
@@ -1443,6 +1456,323 @@ A.progressPpt = async function (m) {
   const fn = (m.date ? m.date.replace(/-/g, '') + '_' : '') + T.replace(/[\\/:*?"<>|]/g, '_') + '_進度簡報.pptx';
   try { await A.downloads.save({ filename: fn, data: blob }); } catch (e) { if (!e || e.code !== 'declined') A.toast('下載失敗：' + ((e && e.message) || '')); }
 };
+
+/* ---------- 審查意見：排序、匯入（Word 表格／PDF／貼上文字 → 逐條） ---------- */
+const REPORTS = ['工作計畫書', '期中報告', '期末報告', '總結報告'];
+const reviewsOf = rp => S.reviews.filter(r => (r.report || '工作計畫書') === rp).sort((a, b) => (Number(a.seq) || 0) - (Number(b.seq) || 0) || (a.id < b.id ? -1 : 1));
+// 新增或匯入時預設的報告：送審中的那一期，沒有就是還沒核定的第一期
+const curReport = () => { const dl = A.deliverables(); const d = dl.filter(x => A.delivStatus(x) === '已提送').pop() || dl.find(x => A.delivStatus(x) !== '已核定') || dl[0]; return d && REPORTS.includes(d.name) ? d.name : '工作計畫書'; };
+const NUM_HEAD = /^\s*(?:[（(]\s*[一二三四五六七八九十百0-9０-９]+\s*[）)]|[一二三四五六七八九十百]+\s*[、.．]|[0-9０-９]+\s*[.、．)）](?![0-9０-９])|[①-⑳])\s*/;
+const stripNo = s => String(s || '').replace(NUM_HEAD, '').trim();
+const WHO_P = /委員|教授|老師|代表|主委|主任|顧問|主席|處長|局長|署長|科長|組長|司長|執行秘書/;
+const WHO_ORG = /(署|部|局|處|組|科|室|中心|府|公所|會|單位|大學|研究院)$/;
+const NOT_REVIEW = /^(結論|決議|主席(結論|裁示|致詞)|裁示|散會|臨時動議)/;
+const META = /^(主旨|說明|受文者|發文日期|發文字號|速別|密等|附件|正本|副本|檔號|保存年限|開會事由|開會時間|開會地點|會議時間|會議地點|時間|地點|主持人|出席|列席|紀錄|記錄)\s*[：:]/;
+const INLINE_WHO = /^((?:[（(]?[一二三四五六七八九十0-9０-９]+[）)、.．]\s*)?[^：:，。；、\s]{1,16}?(?:委員|教授|老師|代表|主任|組長|科長|處長|局長|署長|司長|主委|署|局|處|組|府|公所|學會|協會)[^：:，。；、\s（(]{0,4})(?:[（(][^）)]{1,12}[）)])?\s*[：:]\s*(.+)$/;
+// 一行是不是「委員／單位」標題：短、沒有句讀，而且像人名職稱或機關名稱（或以冒號結尾）
+const whoOf = s => {
+  const raw = stripNo(s), colon = /[：:]\s*$/.test(raw), t = raw.replace(/[：:]\s*$/, '').trim();
+  if (!t || t.length > 24 || /[。；，,;？?！!]/.test(t)) return null;
+  return WHO_P.test(t) || WHO_ORG.test(t) || colon ? t : null;
+};
+// 條列文字 → 意見：「一、王委員」這類標題換人，「（一）」「1.」開新的一條，沒有編號的行接在上一條後面
+A.parseReviewText = function (paras) {
+  const items = []; let who = '', cur = null, skip = false;
+  const push = t => { cur = { who, op: t, resp: '', pages: '', on: !skip }; items.push(cur); };
+  (paras || []).forEach(raw => {
+    const s = String(raw || '').trim(); if (!s) return;
+    if (META.test(stripNo(s))) { cur = null; return; }
+    const il = s.match(INLINE_WHO);
+    if (il) { const w0 = stripNo(il[1]); if ((WHO_P.test(w0) || WHO_ORG.test(w0)) && !/有關|關於|建議|是否|部分|方面|請|應/.test(w0)) { who = w0; skip = NOT_REVIEW.test(who); push(stripNo(il[2])); return; } }
+    const w = whoOf(s);
+    if (w) { who = w; skip = NOT_REVIEW.test(w); cur = null; return; }
+    if (NUM_HEAD.test(s) || !cur) { const t = stripNo(s); if (t) push(t); return; }
+    cur.op += (/[A-Za-z0-9]$/.test(cur.op) && /^[A-Za-z0-9]/.test(s) ? ' ' : '') + s;
+  });
+  return items.filter(x => x.op.length >= 2);
+};
+// Word 表格 → 意見：表頭找「意見」欄（另找委員、回應、頁次欄）；只有一格的列當作委員或單位標題
+A.parseReviewTables = function (tables) {
+  const items = []; let map = null;
+  const clean = s => String(s || '').replace(/\s/g, '');
+  const find = (cells, re, not) => { const c = cells.find(x => re.test(clean(x.t)) && !(not && not.test(clean(x.t)))); return c ? c.col : -1; };
+  (tables || []).forEach(rows => {
+    let start = 0;
+    for (let r = 0; r < Math.min(3, rows.length); r++) {
+      const cells = rows[r], op = find(cells, /意見/, /回應|回復|回覆|辦理|處理|說明/);
+      if (op >= 0) { map = { op, who: find(cells, /委員|單位|機關|發言|審查人|姓名/, /意見/), resp: find(cells, /回應|回復|回覆|辦理情形|處理情形|說明/), pages: find(cells, /頁/) }; start = r + 1; break; }
+    }
+    if (!map) return;
+    let who = '';
+    rows.slice(start).forEach(cells => {
+      const at = col => { if (col < 0) return ''; const c = cells.find(x => x.col <= col && col < x.col + (x.span || 1)); return c ? c.t : ''; };
+      const filled = cells.filter(c => c.t); if (!filled.length) return;
+      const op = at(map.op);
+      if (filled.length === 1 && ((filled[0].span || 1) > 1 || !op)) { const t = stripNo(filled[0].t.split('\n')[0]).replace(/[：:]\s*$/, ''); if (t && t.length <= 30) { who = t; return; } }
+      if (!op) return;
+      const w = map.who >= 0 && map.who !== map.op ? stripNo(at(map.who)).replace(/[：:]\s*$/, '') : '';
+      items.push({ who: w || who, op: stripNo(op), resp: at(map.resp), pages: at(map.pages), on: true });
+    });
+  });
+  return items;
+};
+const nrm = s => String(s || '').replace(/[ 　]/g, ' ').replace(/[ \t]+/g, ' ').trim();
+A.importReviews = function () {
+  if (!S.canWrite) { A.toast('你目前只有檢視權限。'); return; }
+  let rp = curReport(), items = [], src = '';
+  const holder = h('div', { class: 'br-b', style: 'padding:0 22px 8px' }), footBox = h('div', { style: 'display:contents' });
+  const pick = h('input', { type: 'file', accept: '.docx,.pdf,.txt', style: 'display:none', id: 'ri-file' });
+  const ta = h('textarea', { class: 'in', rows: 9, id: 'ri-paste', placeholder: '把審查意見貼在這裡：可以直接從 Word 表格複製，或貼上「一、王委員」「（一）……」這類條列文字' });
+  const repSel = h('select', { class: 'in sm', id: 'ri-rep', style: 'width:auto' }, REPORTS.map(x => h('option', { value: x, selected: x === rp ? true : null }, x)));
+  const kk = s => String(s || '').replace(/[\s　、，。；：:,.;（）()「」]/g, '');
+  const markDup = () => { const have = new Set(reviewsOf(rp).map(r => kk(r.opinion))); items.forEach(x => { const d = have.has(kk(x.op)); if (d && !x.dup) x.on = false; x.dup = d; }); };
+  repSel.addEventListener('change', () => { rp = repSel.value; if (items.length) { markDup(); drawList(); } });
+  const setFoot = btns => footBox.replaceChildren(...btns);
+  const close = modal('匯入審查意見', '把國土署來文的審查意見拆成一條一條，檢查後再匯入', holder, () => [pick, footBox], true);
+  const drawSrc = () => {
+    holder.replaceChildren(h('div', { class: 'ri-src' }, A.field('匯入到', repSel),
+      h('div', { style: 'display:flex;gap:10px;flex-wrap:wrap;align-items:center' }, h('button', { class: 'btn sm', type: 'button', onclick: () => pick.click() }, '選擇檔案（Word／PDF／文字檔）'), h('small', { class: 'muted' }, 'Word 有表格時，依「審查意見」「回應」「頁次」欄讀取')),
+      ta, h('p', { class: 'cap', style: 'margin:0' }, '讀完會先列出每一條讓你檢查、修改，確認後才匯入；委員或單位名稱會自動帶入。')));
+    setFoot([h('button', { class: 'btn sm', type: 'button', onclick: close }, '取消'), h('button', { class: 'btn sm pri', type: 'button', onclick: () => { if (!ta.value.trim()) { A.toast('還沒有貼上文字。'); return; } src = '貼上的文字'; read(null, ta.value); } }, '讀取貼上的文字')]);
+  };
+  const read = async (file, text) => {
+    let got = [];
+    try {
+      if (file && /\.docx$/i.test(file.name)) { got = A.parseReviewTables(await A.docxTables(file)); if (!got.length) got = A.parseReviewText(await A.extractText(file)); }
+      else if (file) got = A.parseReviewText(await A.extractText(file));
+      else {
+        const ls = String(text).replace(/\r/g, '').split('\n').filter(l => l.trim());
+        if (ls.filter(l => l.includes('\t')).length >= 2) got = A.parseReviewTables([ls.map(l => l.split('\t').map((t, i) => ({ t: nrm(t), span: 1, col: i })))]);
+        if (!got.length) got = A.parseReviewText(A.textToParas(text));
+      }
+    } catch (e) { A.toast((e && e.message) || '讀取失敗'); return; }
+    if (!got.length) { A.toast('沒有讀到審查意見，請確認內容，或改用貼上文字。'); return; }
+    items = got; markDup(); drawList();
+  };
+  pick.addEventListener('change', () => { const f = pick.files[0]; pick.value = ''; if (!f) return; src = f.name; A.toast('讀取中：' + f.name); read(f); });
+  const drawList = () => {
+    const st = holder.scrollTop, on = items.filter(x => x.on).length, dups = items.filter(x => x.dup).length, order = [];
+    items.forEach(x => { if (!order.includes(x.who)) order.push(x.who); });
+    const box = h('div', null, h('div', { class: 'rk ' + (dups ? 'warn' : 'ok') }, (src ? src + '：' : '') + '讀到 ' + items.length + ' 條，共 ' + order.length + ' 位委員或單位' + (dups ? '；其中 ' + dups + ' 條清單裡已經有了，預設不匯入' : '') + '。'),
+      h('div', { style: 'margin-top:10px' }, A.field('匯入到', repSel)));
+    order.forEach(w => {
+      const g = items.filter(x => x.who === w), allOn = g.every(x => x.on);
+      const wIn = h('input', { class: 'in sm', placeholder: '委員／單位（可不填）' }); wIn.value = w;
+      wIn.addEventListener('change', () => { const v = wIn.value.trim(); g.forEach(x => { x.who = v; }); drawList(); });
+      const grp = h('div', { class: 'ri-g' }, h('div', { class: 'ri-gh' }, h('button', { class: 'chk' + (allOn ? ' on' : ''), type: 'button', 'aria-label': '整組勾選', onclick: () => { g.forEach(x => { x.on = !allOn; }); drawList(); } }), wIn, h('small', null, g.filter(x => x.on).length + ' / ' + g.length)));
+      g.forEach(x => { const t = h('textarea', { class: 'in' }); t.value = x.op; t.addEventListener('change', () => { x.op = t.value; });
+        grp.append(h('div', { class: 'ri-i' + (x.on ? '' : ' off') }, h('button', { class: 'chk' + (x.on ? ' on' : ''), type: 'button', 'aria-label': '匯入這一條', onclick: () => { x.on = !x.on; drawList(); } }), t,
+          x.dup ? h('em', null, '清單裡已有相同的意見') : x.resp ? h('em', { class: 'm' }, '含回應：' + cut(x.resp, 40)) : '')); });
+      box.append(grp);
+    });
+    holder.replaceChildren(box); holder.scrollTop = st;
+    setFoot([h('button', { class: 'btn sm', type: 'button', onclick: () => { items = []; drawSrc(); } }, '重新選擇'), h('button', { class: 'btn sm pri', type: 'button', onclick: go }, '匯入 ' + on + ' 條')]);
+  };
+  const go = async () => {
+    const sel = items.filter(x => x.on && String(x.op).trim()); if (!sel.length) { A.toast('沒有勾選要匯入的意見。'); return; }
+    close(); A.toast('匯入中，共 ' + sel.length + ' 條…');
+    let seq = Math.max(0, ...reviewsOf(rp).map(r => Number(r.seq) || 0)), n = 0;
+    for (let i = 0; i < sel.length; i += 8) {
+      const res = await Promise.all(sel.slice(i, i + 8).map(x => { seq++; const resp = String(x.resp || '').trim();
+        return A.put('reviews', A.newId(), { report: rp, who: String(x.who || '').trim(), opinion: String(x.op).trim(), response: resp, pages: String(x.pages || '').trim(), owner: '', status: resp ? '已回應' : '未回應', seq, src: 'import' }); }));
+      n += res.filter(Boolean).length;
+    }
+    S.docTab = 'reviews'; A.go('docs'); A.toast('已匯入 ' + n + ' 條審查意見，記得指定負責人。');
+  };
+  drawSrc();
+};
+
+/* ---------- 決議列管：所有會議的決議集中追蹤 ---------- */
+const allDecisions = () => { const out = []; S.meetings.forEach(m => ((m.minutes || {}).decisions || []).forEach((d, i) => { if (d && d.text) out.push({ m, d, i }); }));
+  return out.sort((a, b) => { const x = a.m.date || '', y = b.m.date || ''; return x < y ? 1 : x > y ? -1 : a.m.id < b.m.id ? -1 : a.m.id > b.m.id ? 1 : a.i - b.i; }); };
+A.allDecisions = allDecisions;
+const decSt = d => (d.done ? 'done' : d.due && d.due < today() ? 'late' : 'open');
+S.df = { owner: '', st: 'open', type: '' };
+const decFiltered = () => { const f = S.df; return allDecisions().filter(x => (!f.owner || x.d.owner === f.owner) && (!f.type || x.m.type === f.type) && (f.st === 'all' || (f.st === 'open' ? !x.d.done : decSt(x.d) === f.st))); };
+// 決議存在會議的 minutes.decisions 陣列裡，改一條就把整個陣列寫回去
+const patchDec = (m, i, p) => { const mm = A.byId('meetings', m.id) || m, mi = Object.assign({ summary: '', decisions: [], files: [], paths: [] }, mm.minutes || {}), decs = (mi.decisions || []).map(x => Object.assign({}, x)); if (!decs[i]) return null; Object.assign(decs[i], p); return A.patch('meetings', m.id, { minutes: Object.assign({}, mi, { decisions: decs }) }); };
+function decisionsView(frag, seg) {
+  const f = S.df, all = allDecisions(), list = decFiltered();
+  const tb = h('div', { class: 'toolbar' }, seg, A.sel(f.owner, A.peopleOpts('全部負責人'), v => { f.owner = v; A.render(); }, { sm: true, id: 'df-owner' }),
+    A.sel(f.st, [['open', '未辦結'], ['late', '逾期'], ['done', '已辦結'], ['all', '全部']], v => { f.st = v; A.render(); }, { sm: true, id: 'df-st' }),
+    A.sel(f.type, [['', '全部會議類型'], ...types().map(t => [t.id, t.name])], v => { f.type = v; A.render(); }, { sm: true, id: 'df-type' }));
+  tb.querySelectorAll('select').forEach(s => { s.disabled = false; });
+  frag.append(tb);
+  if (!all.length) { frag.append(card(h('div'), emptyBox('還沒有決議', '開完會後在會議裡新增決議、指定負責人與期限，這裡會集中列出，方便追蹤辦理情形。'))); return; }
+  const nLate = all.filter(x => decSt(x.d) === 'late').length, nOpen = all.filter(x => !x.d.done).length;
+  const body = h('tbody'); let lastM = null;
+  list.forEach(x => {
+    if (x.m !== lastM) { lastM = x.m; const mt = x.m; body.append(h('tr', { class: 'grp click', onclick: () => A.openDrawer('meeting', mt.id) }, h('td', { colspan: 5 }, (mt.date ? A.roc(mt.date) + '　' : '') + (mt.title || '會議'), h('small', { class: 'muted', style: 'margin-left:8px;font-weight:400' }, (A.typeOf(mt.type) || {}).name || '')))); }
+    const d = x.d, s = decSt(d), tk = d.taskId ? A.byId('tasks', d.taskId) : null, key = x.m.id + '-' + x.i;
+    body.append(h('tr', null,
+      h('td', { style: 'width:40px' }, h('button', { class: 'chk' + (d.done ? ' on' : ''), type: 'button', 'aria-label': '辦結', onclick: () => { if (S.canWrite) patchDec(x.m, x.i, { done: !d.done, doneAt: d.done ? '' : today() }); } })),
+      h('td', { class: 'mm1' }, h('span', { class: d.done ? 'done-t' : null }, d.text), tk ? h('small', { class: 'deps' }, '已轉成工項：' + (tk.status || '未開始') + (tk.status === '完成' && !d.done ? '，可以勾辦結' : '')) : ''),
+      h('td', { style: 'min-width:110px' }, A.sel(d.owner || '', A.peopleOpts('未指派'), v => patchDec(x.m, x.i, { owner: v }), { sm: true, id: 'dco-' + key })),
+      h('td', { style: 'min-width:140px' }, A.inp(d.due, v => patchDec(x.m, x.i, { due: v }), { sm: true, type: 'date', id: 'dcd-' + key }),
+        s === 'late' ? h('div', { style: 'margin-top:4px' }, h('span', { class: 'tag t-bad' }, lateTxt(d.due))) : s === 'done' ? h('div', { style: 'margin-top:4px' }, h('span', { class: 'tag t-good' }, '已辦結' + (d.doneAt ? ' ' + A.md(d.doneAt) : ''))) : ''),
+      h('td', { class: 'mw', style: 'min-width:220px' }, A.inp(d.prog, v => patchDec(x.m, x.i, { prog: v }), { sm: true, ph: '辦理情形', id: 'dcp-' + key }))));
+  });
+  frag.append(card(chead('決議列管', '共 ' + all.length + ' 條．未辦結 ' + nOpen + '．逾期 ' + nLate, list.length !== all.length ? h('small', { class: 'muted' }, '目前列出 ' + list.length + ' 條') : ''),
+    list.length ? h('div', { class: 'tbl mc', style: 'margin-top:10px' }, h('table', null, h('thead', null, h('tr', null, h('th'), h('th', null, '決議事項'), h('th', null, '負責'), h('th', null, '期限'), h('th', null, '辦理情形'))), body))
+      : emptyBox('沒有符合條件的決議', '調整上面的篩選條件看看。')));
+}
+A.decisionsDoc = async function () {
+  const list = decFiltered(); if (!list.length) { A.toast('沒有符合條件的決議。'); return; }
+  const rows = [['編號', '決議事項', '負責', '期限', '辦理情形']]; let lastM = null, k = 0;
+  list.forEach(x => { if (x.m !== lastM) { lastM = x.m; k = 0; rows.push({ span: (x.m.title || '會議') + (x.m.date ? '（' + A.roc(x.m.date) + '）' : '') }); }
+    k++; const d = x.d; rows.push([{ t: String(k), align: 'center' }, d.text, { t: A.pname(d.owner) || '', align: 'center' }, { t: d.due ? A.roc(d.due) : '', align: 'center' }, (d.prog ? d.prog + '\n' : '') + '（' + decState(d) + (d.done && d.doneAt ? '，' + A.roc(d.doneAt) : '') + '）']); });
+  const x = A.docx.para('「' + PROJ_NAME + '」會議決議事項辦理情形表', { b: true, sz: 16, align: 'center', after: 120 }) + A.docx.para('統計至 ' + rocLong(today()).replace(/（.*$/, ''), { sz: 11, align: 'right', after: 160 }) + A.docx.tbl([700, 3800, 1100, 1200, 2838], rows, { header: true, sz: 12 });
+  await A.makeDocx('會議決議辦理情形表_' + today().replace(/-/g, '') + '.docx', x, { sz: 12 });
+};
+function exportDecisions() {
+  A.exportCSV('國土通檢_決議列管', [['會議日期', '會議', '決議事項', '負責', '期限', '辦理情形', '狀態', '辦結日'], ...decFiltered().map(x => [A.roc(x.m.date), x.m.title || '', x.d.text, A.pname(x.d.owner), A.roc(x.d.due), x.d.prog || '', decState(x.d), A.roc(x.d.doneAt)])]);
+}
+
+/* ---------- LINE 通知文字：產生後可先修改再複製 ---------- */
+const rocNs = d => { const x = A.parse(d); return (x.getFullYear() - 1911) + '年' + (x.getMonth() + 1) + '月' + x.getDate() + '日（星期' + '日一二三四五六'[x.getDay()] + '）'; };
+const timeNs = t => { const mm = String(t || '').match(/^(\d{1,2})[:：](\d{2})/); if (!mm) return String(t || ''); const H = Number(mm[1]), M = Number(mm[2]); return (H < 12 ? '上午' : H === 12 ? '中午' : '下午') + (H > 12 ? H - 12 : H) + '時' + (M ? M + '分' : ''); };
+const issName = n => { const i = S.issues.find(x => Number(x.no) === Number(n)); return i && i.name ? i.name : ''; };
+const cut = (s, n) => { s = String(s || ''); return s.length > n ? s.slice(0, n) + '…' : s; };
+// kind：team＝團隊群組（條列）、owner＝業主群組（連續敘事，不用條列與表情符號）、dec＝會議決議
+A.lineMeeting = function (m, kind) {
+  const T = m.title || '會議', iss = (m.issues || []).map(Number), steps = A.prep(m);
+  if (kind === 'owner') {
+    if (!m.date) return '各位長官好，' + T + '的日期確定後再另行通知，謝謝。';
+    const st = steps.find(s => /署/.test(s.name) && !s.done && s.due && s.due >= today()), sd = st ? A.parse(st.due) : null;
+    return '各位長官好，' + T + '訂於' + rocNs(m.date) + (m.time ? timeNs(m.time) : '') + (m.place ? '於' + m.place : '') + '召開'
+      + (iss.length ? '，本次將討論議題' + iss.join('、') : '') + (sd ? '，會議資料將於' + (sd.getMonth() + 1) + '月' + sd.getDate() + '日前提供' : '') + '，敬請撥冗出席，謝謝。';
+  }
+  if (kind === 'dec') {
+    const ds = ((m.minutes || {}).decisions || []).filter(d => d.text);
+    return ['【會議決議】' + T + (m.date ? '（' + A.md(m.date) + '）' : '')].concat(ds.map((d, i) => { const tail = [A.pname(d.owner), d.due ? A.md(d.due) + ' 前' : ''].filter(Boolean).join('，'); return (i + 1) + '. ' + d.text + (tail ? '（' + tail + '）' : ''); })).join('\n');
+  }
+  const out = ['【會議通知】' + T, '時間：' + (m.date ? A.mdw(m.date) + (m.time ? ' ' + m.time : '') : '未定')];
+  if (m.place) out.push('地點：' + m.place);
+  if (m.chair) out.push('主持人：' + m.chair);
+  if (iss.length) { out.push('討論議題：'); iss.forEach(n => out.push('・議題 ' + n + (issName(n) ? ' ' + cut(issName(n), 26) : ''))); }
+  const open = steps.filter(s => s.due && !s.done);
+  if (open.length && !held(m)) { out.push('會前作業：'); open.forEach(s => out.push('・' + A.md(s.due) + ' ' + s.name + (leftTxt(s.due) ? '（' + leftTxt(s.due) + '）' : ''))); }
+  return out.join('\n');
+};
+// 本週提醒：未來 7 天的會議、會前作業、到期工項、逾期工項、決議、導讀摘要、公文、契約事項
+A.lineWeek = function () {
+  const td = today(), end = A.addDays(td, 6), byD = (a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0);
+  const who = ids => ids.map(A.pname).filter(Boolean).join('、'), late = d => (d < td ? ' 已逾期' : '');
+  const ln = (d, t, w) => '・' + A.md(d) + ' ' + t + (w ? '（' + w + '）' : '');
+  const ms = S.meetings.filter(m => m.date && m.date >= td && m.date <= end).sort((a, b) => (a.date < b.date ? -1 : 1)).map(m => '・' + A.mdw(m.date) + (m.time ? ' ' + m.time : '') + ' ' + (m.title || '會議') + (m.place ? '（' + m.place + '）' : ''));
+  const preps = []; S.meetings.forEach(m => { if (held(m) || !m.date || m.date < td) return; A.prep(m).forEach(s => { if (!s.done && s.due && s.due <= end) preps.push([s.due, ln(s.due, s.name + '｜' + (m.title || '會議')) + late(s.due)]); }); });
+  const tasks = S.tasks.filter(t => t.status !== '完成' && t.due && t.due >= td && t.due <= end).map(t => [t.due, ln(t.due, t.title, who(t.owners || []))]);
+  const lates = S.tasks.filter(t => t.status !== '完成' && t.due && t.due < td).map(t => [t.due, ln(t.due, t.title, who(t.owners || [])) + ' 逾期 ' + A.diff(td, t.due) + ' 天']);
+  const decs = []; S.meetings.forEach(m => ((m.minutes || {}).decisions || []).forEach(d => { if (d.text && !d.done && d.due && d.due <= end) decs.push([d.due, ln(d.due, d.text, A.pname(d.owner)) + late(d.due)]); }));
+  const reads = S.issues.filter(i => i.summaryDue && i.summaryDue <= end && !DONE_ST.includes(i.status)).map(i => [i.summaryDue, ln(i.summaryDue, '議題 ' + i.no + ' 導讀摘要', A.pname(i.reader)) + late(i.summaryDue)]);
+  const lets = (S.letters || []).filter(l => l.status !== '已辦結' && l.due && l.due <= end).map(l => [l.due, ln(l.due, '公文：' + cut(l.subject || l.no || '', 30), A.pname(l.owner)) + late(l.due)]);
+  const dus = (S.duties || []).map(x => [dutyDue(x), x]).filter(([d, x]) => d && d <= end && !dutyDone(x)).map(([d, x]) => [d, ln(d, x.name || '契約事項', A.pname(x.owner)) + late(d)]);
+  const out = ['【本週工作提醒】' + A.md(td) + '–' + A.md(end)];
+  const add = (title, arr, max) => { if (!arr.length) return; max = max || 12; const a = arr.sort(byD).map(x => x[1]); out.push('', title, ...a.slice(0, max)); if (a.length > max) out.push('・另有 ' + (a.length - max) + ' 項'); };
+  if (ms.length) out.push('', '會議', ...ms);
+  add('會前作業', preps); add('到期工項', tasks); add('已逾期工項', lates, 8); add('待辦決議', decs); add('導讀摘要', reads); add('公文期限', lets); add('契約事項', dus);
+  if (out.length === 1) out.push('', '未來 7 天沒有排定的會議或到期的工作。');
+  return out.join('\n');
+};
+function lineModal(title, variants) {
+  let cur = variants[0];
+  const ta = h('textarea', { class: 'in lt-ta', id: 'lt-text' }); ta.value = cur[2]();
+  const seg = variants.length > 1 ? h('div', { class: 'seg', style: 'margin-bottom:10px' }, variants.map(v => h('button', { type: 'button', 'aria-pressed': String(v === cur), onclick: e => { cur = v; ta.value = v[2](); seg.querySelectorAll('button').forEach(b => b.setAttribute('aria-pressed', String(b === e.currentTarget))); } }, v[1]))) : '';
+  modal(title, '可以先修改文字，再按「複製」貼到 LINE', h('div', { class: 'br-b', style: 'padding:0 22px 8px' }, seg, ta), close => [h('button', { class: 'btn sm', type: 'button', onclick: close }, '關閉'), h('button', { class: 'btn sm pri', type: 'button', onclick: () => A.copyText(ta.value, ta) }, '複製')]);
+}
+A.lineMeetingModal = function (m) {
+  const v = [['team', '團隊群組', () => A.lineMeeting(m, 'team')], ['owner', '業主群組', () => A.lineMeeting(m, 'owner')]];
+  if (((m.minutes || {}).decisions || []).some(d => d.text)) { const dv = ['dec', '會議決議', () => A.lineMeeting(m, 'dec')]; if (held(m)) v.unshift(dv); else v.push(dv); }
+  lineModal('LINE 通知文字', v);
+};
+A.lineWeekModal = () => lineModal('本週工作提醒', [['week', '團隊群組', A.lineWeek]]);
+
+/* ---------- 契約應辦事項：報告書、會議自動統計；宣導與紀錄等項目手動填完成數量 ---------- */
+const DCATS = ['報告書', '會議', '宣導與紀錄', '其他'];
+// 依邀標書整理的預設項目；簽約後請使用者對照契約書修正
+const DUTY_SEED = [
+  { cat: '宣導與紀錄', name: '文宣品（第 1 項）', qty: 2000, unit: '份', note: '文宣品 2 項，各 2,000 份' },
+  { cat: '宣導與紀錄', name: '文宣品（第 2 項）', qty: 2000, unit: '份', note: '文宣品 2 項，各 2,000 份' },
+  { cat: '宣導與紀錄', name: '宣導圖卡', qty: 20, unit: '張', note: '至少 20 張' },
+  { cat: '宣導與紀錄', name: '大事紀及政策紀錄', qty: 100, unit: '份', note: '印製 100 份' },
+  { cat: '宣導與紀錄', name: '紀錄片', qty: 1, unit: '部', note: '' },
+  { cat: '報告書', name: '總結報告定稿', qty: 5, unit: '份', note: '總結報告核定後 15 天內提送' },
+  { cat: '報告書', name: '成果光碟', qty: 5, unit: '片', note: '隨總結報告定稿提送' }
+];
+const dutyDue = x => x.due || (x.phase && S.project.startDate ? (d => (d ? A.delivDue(d) : null))(A.deliverables().find(d => d.key === x.phase)) : null);
+const dutyDone = x => (Number(x.qty) || 0) > 0 && (Number(x.done) || 0) >= Number(x.qty);
+const dState = (done, qty, due) => (qty > 0 && done >= qty ? '已完成' : due && due < today() ? '逾期' : done > 0 ? '進行中' : '未開始');
+const dTag = s => h('span', { class: 'tag ' + ({ '已完成': 't-good', '進行中': 't-blue', '審查中': 't-blue', '逾期': 't-bad' }[s] || '') }, s);
+const fmtN = n => Number(n || 0).toLocaleString('zh-TW');
+A.dutyRows = function () {
+  const rows = [], td = today(), end = S.project.startDate ? A.addDays(S.project.startDate, A.totalDays() - 1) : null;
+  A.deliverables().forEach(d => { const st = A.delivStatus(d), due = A.delivDue(d);
+    rows.push({ auto: 'deliv', cat: '報告書', name: d.name, qty: d.copies || null, unit: d.copies ? '份' : '', doneTxt: st, pct: st === '已核定' ? 1 : st === '已提送' ? 0.5 : 0, due, state: st === '已核定' ? '已完成' : st === '已提送' ? '審查中' : due && due < td ? '逾期' : '未開始', note: d.note || '', seq: -1000 + (Number(d.day) || 0), open: () => A.go('admin') }); });
+  types().filter(t => Number(t.quota) > 0).forEach((t, k) => { const ms = S.meetings.filter(m => m.type === t.id), dn = ms.filter(held).length, sc = ms.filter(m => !held(m) && m.date && m.date >= td).length, q = Number(t.quota);
+    rows.push({ auto: 'meet', cat: '會議', name: t.name, qty: q, unit: '場', doneTxt: '已開 ' + dn + ' / ' + q + (sc ? '．已排定 ' + sc : ''), pct: Math.min(1, dn / q), due: end, state: dState(dn, q, end), seq: k, open: () => { S.mType = t.id; S.mView = 'list'; A.go('meetings'); } }); });
+  (S.duties || []).forEach(x => { const q = Number(x.qty) || 0, dn = Number(x.done) || 0, due = dutyDue(x);
+    rows.push({ id: x.id, cat: DCATS.includes(x.cat) ? x.cat : '其他', name: x.name || '（未命名）', qty: q || null, unit: x.unit || '', doneTxt: q ? '完成 ' + fmtN(dn) + ' / ' + fmtN(q) : dn ? '完成 ' + fmtN(dn) : '尚未填寫', pct: q ? Math.min(1, dn / q) : 0, due, state: dState(dn, q, due), owner: x.owner || '', note: x.note || '', evid: x.evid || '', seq: Number(x.seq) || 0, open: () => A.openDrawer('duty', x.id) }); });
+  return rows;
+};
+A.dutyStats = () => { const r = A.dutyRows(); return { total: r.length, done: r.filter(x => x.state === '已完成').length, late: r.filter(x => x.state === '逾期').length }; };
+const dutyCats = rows => DCATS.concat([...new Set(rows.map(r => r.cat))].filter(c => !DCATS.includes(c)));
+A.pages.contract = function (frag) {
+  frag.append(h('div', { class: 'page-h' }, h('div', null, h('h1', null, '契約'), h('p', null, '契約要交的報告書、要辦的會議與宣導成果，一張表看完成度；驗收、結案時可以直接匯出辦理情形表。')),
+    h('div', { class: 'act' }, h('button', { class: 'btn', type: 'button', onclick: () => A.dutiesDoc() }, '匯出 Word'), h('button', { class: 'btn', type: 'button', onclick: exportDuties }, '匯出 Excel'),
+      S.canWrite && !S.dutiesErr ? h('button', { class: 'btn', type: 'button', onclick: () => A.newDuty() }, '新增項目') : '')));
+  if (!readyGate(frag)) return;
+  if (S.dutiesErr) frag.append(h('div', { class: 'demo-ribbon' }, '自訂項目還不能使用：請管理者到 Firebase 更新 Firestore 安全規則，再重新整理。報告書與會議的統計不受影響。'));
+  const rows = A.dutyRows(), cnt = s => rows.filter(r => r.state === s).length;
+  const sum = h('div', { class: 'du-sum' }, h('span', { class: 'tag' }, '共 ' + rows.length + ' 項'), h('span', { class: 'tag t-good' }, '已完成 ' + cnt('已完成')), h('span', { class: 'tag t-blue' }, '進行中 ' + (cnt('進行中') + cnt('審查中'))), cnt('逾期') ? h('span', { class: 'tag t-bad' }, '逾期 ' + cnt('逾期')) : '', h('span', { class: 'tag' }, '未開始 ' + cnt('未開始')));
+  const sub = { '報告書': '四期報告的狀態在後台「專案設定」更新', '會議': '依會議頁的已開會場次自動統計，點一列看該類會議' };
+  const tb = h('tbody');
+  dutyCats(rows).forEach(c => { const rs = rows.filter(r => r.cat === c).sort((a, b) => a.seq - b.seq); if (!rs.length) return;
+    tb.append(h('tr', { class: 'grp' }, h('td', { colspan: 6 }, c + '　' + rs.filter(r => r.state === '已完成').length + ' / ' + rs.length, sub[c] ? h('small', { class: 'muted', style: 'margin-left:10px;font-weight:400' }, sub[c]) : '')));
+    rs.forEach(r => tb.append(h('tr', { class: 'click', onclick: r.open },
+      h('td', { class: 'mw' }, h('b', { style: 'font-weight:500' }, r.name), r.note ? h('small', { class: 'deps' }, r.note) : '', r.evid ? h('small', { class: 'deps' }, '佐證：' + r.evid) : ''),
+      h('td', { class: 'num', style: 'white-space:nowrap' }, r.qty ? fmtN(r.qty) + ' ' + r.unit : '—'),
+      h('td', null, h('div', { class: 'du-p' }, h('div', { class: 'du-bar' }, h('i', { style: 'width:' + Math.round(r.pct * 100) + '%' })), h('small', null, r.doneTxt))),
+      h('td', { class: 'num', style: 'white-space:nowrap' }, r.auto === 'meet' ? h('span', { class: 'muted' }, '履約期間') : r.due ? A.roc(r.due) : h('span', { class: 'muted' }, '未定')),
+      h('td', null, r.owner ? A.avatar(r.owner, 24) : ''),
+      h('td', null, dTag(r.state))))); });
+  frag.append(card(chead('應辦事項', '數量依邀標書整理，簽約後請對照契約書修正', sum), h('div', null,
+    h('div', { class: 'tbl mc', style: 'margin-top:12px' }, h('table', null, h('thead', null, h('tr', null, ['項目', '契約數量', '完成情形', '期限', '負責', '狀態'].map(x => h('th', null, x)))), tb)),
+    !(S.duties || []).length && S.canWrite && !S.dutiesErr ? h('div', { class: 'du-seed' }, h('span', null, '還沒有文宣品、圖卡、大事紀、紀錄片等項目。'), h('button', { class: 'btn sm', type: 'button', onclick: () => A.seedDuties() }, '帶入邀標書的項目')) : '')));
+};
+A.drawers.duty = function (id) {
+  const x = A.byId('duties', id); if (!x) return null; const up = d => A.patch('duties', id, d);
+  const q = Number(x.qty) || 0, dn = Number(x.done) || 0, due = dutyDue(x), ph = A.deliverables().find(d => d.key === x.phase);
+  return { title: x.name || '契約事項', actions: delBtn('duties', id, '契約事項'), body: [
+    A.field('項目名稱', A.inp(x.name, v => up({ name: v }), { id: 'du-name', ph: '例如：宣導圖卡' })),
+    h('div', { class: 'fgrid' }, A.field('類別', A.sel(DCATS.includes(x.cat) ? x.cat : '其他', DCATS, v => up({ cat: v }), { id: 'du-cat' })), A.field('負責', A.sel(x.owner || '', A.peopleOpts(), v => up({ owner: v }), { id: 'du-owner' })),
+      A.field('契約數量', A.inp(x.qty, v => up({ qty: v }), { type: 'number', id: 'du-qty' })), A.field('單位', A.inp(x.unit, v => up({ unit: v }), { id: 'du-unit', ph: '份、張、部、片' })),
+      A.field('已完成', A.inp(x.done, v => up({ done: v }), { type: 'number', id: 'du-done' })), A.field('狀態', h('div', null, dTag(dState(dn, q, due)))),
+      A.field('對應期別', A.sel(x.phase || '', [['', '（不限）'], ...A.deliverables().map(d => [d.key, d.name])], v => up({ phase: v }), { id: 'du-phase' })), A.field('期限', A.inp(x.due, v => up({ due: v }), { type: 'date', id: 'du-due' }))),
+    !x.due && ph && due ? h('p', { class: 'cap', style: 'margin:0' }, '沒填期限時，以' + ph.name + '的期限 ' + A.roc(due) + ' 計算。') : '',
+    A.field('規格說明', A.inp(x.note, v => up({ note: v }), { multi: true, id: 'du-note', ph: '契約規定的規格、數量、提送方式' }), true),
+    A.field('驗收佐證', A.inp(x.evid, v => up({ evid: v }), { multi: true, id: 'du-evid', ph: '成果檔案的伺服器路徑、發文字號、照片存放位置' }), true),
+    logLine(x)] };
+};
+A.newDuty = async function () {
+  if (S.dutiesErr) { A.toast('契約事項還不能使用，請管理者更新 Firestore 安全規則。'); return; }
+  const id = A.newId(), seq = Math.max(0, ...(S.duties || []).map(x => Number(x.seq) || 0)) + 1;
+  if (await A.put('duties', id, { cat: '宣導與紀錄', name: '', qty: null, unit: '', done: 0, phase: '', due: '', owner: '', note: '', evid: '', seq })) { if (S.page !== 'contract') A.go('contract'); A.openDrawer('duty', id); }
+};
+A.seedDuties = async function () {
+  if ((S.duties || []).length) return;
+  let seq = 0; for (const d of DUTY_SEED) await A.put('duties', A.newId(), Object.assign({ done: 0, phase: '', due: '', owner: '', evid: '' }, d, { seq: ++seq }));
+  A.toast('已帶入 ' + DUTY_SEED.length + ' 個項目，數量請對照契約書確認。');
+};
+A.dutiesDoc = async function () {
+  const rows = A.dutyRows(), out = [['編號', '項目', '契約數量', '完成情形', '期限', '狀態']]; let k = 0;
+  dutyCats(rows).forEach(c => { const rs = rows.filter(r => r.cat === c).sort((a, b) => a.seq - b.seq); if (!rs.length) return; out.push({ span: c });
+    rs.forEach(r => { k++; out.push([{ t: String(k), align: 'center' }, r.name + (r.note ? '\n' + r.note : '') + (r.evid ? '\n佐證：' + r.evid : ''), { t: r.qty ? fmtN(r.qty) + ' ' + r.unit : '—', align: 'center' }, r.doneTxt, { t: r.auto === 'meet' ? '履約期間' : r.due ? A.roc(r.due) : '未定', align: 'center' }, { t: r.state, align: 'center' }]); }); });
+  const x = A.docx.para('「' + PROJ_NAME + '」契約應辦事項辦理情形表', { b: true, sz: 16, align: 'center', after: 120 }) + A.docx.para('統計至 ' + rocLong(today()).replace(/（.*$/, ''), { sz: 11, align: 'right', after: 160 }) + A.docx.tbl([700, 3138, 1300, 2200, 1300, 1000], out, { header: true, sz: 12 });
+  await A.makeDocx('契約應辦事項辦理情形表_' + today().replace(/-/g, '') + '.docx', x, { sz: 12 });
+};
+function exportDuties() {
+  A.exportCSV('國土通檢_契約應辦事項', [['類別', '項目', '契約數量', '單位', '完成情形', '期限', '負責', '狀態', '規格說明', '驗收佐證'], ...A.dutyRows().map(r => [r.cat, r.name, r.qty || '', r.unit, r.doneTxt, r.auto === 'meet' ? '履約期間' : A.roc(r.due), A.pname(r.owner), r.state, r.note || '', r.evid || ''])]);
+}
 
 A.boot();
 })();
