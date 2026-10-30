@@ -179,8 +179,8 @@ window.FB_ADMIN = function (frag) {
     const f = pick.files[0]; if (!f) return; let data;
     try { data = JSON.parse(await f.text()); } catch (_) { A.toast('檔案不是正確的 JSON。'); return; }
     const writes = []; Object.keys(data).forEach(c => (data[c] || []).forEach(d => { const id = d.id; if (!id) return; const v = Object.assign({}, d); delete v.id; writes.push([c, id, v]); }));
-    A.confirm('匯入 ' + writes.length + ' 筆資料？', '同 id 的資料會被檔案內容覆蓋。', '匯入', async () => {
-      try { for (let i = 0; i < writes.length; i += 400) { const b = fs.batch(); writes.slice(i, i + 400).forEach(([c, id, v]) => b.set(fs.collection(c).doc(id), v)); await b.commit(); } A.toast('已匯入 ' + writes.length + ' 筆。'); }
+    A.confirm('匯入 ' + writes.length + ' 筆資料？', '同 id 的資料會被檔案內容覆蓋（草案修訂的集合改為合併，不會洗掉已填的審閱）。', '匯入', async () => {
+      try { for (let i = 0; i < writes.length; i += 400) { const b = fs.batch(); writes.slice(i, i + 400).forEach(([c, id, v]) => b.set(fs.collection(c).doc(id), v, c.indexOf('plan_') === 0 ? { merge: true } : undefined)); await b.commit(); } A.toast('已匯入 ' + writes.length + ' 筆。'); }
       catch (e) { A.toast('匯入失敗：' + ((e && e.message) || '')); } });
     pick.value = '';
   });

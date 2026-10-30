@@ -46,10 +46,10 @@ A.workdaysBetween = (a, b) => { const H = A.holidaySet(); if (a >= b) return 0; 
 const S = A.S = {
   ready: false, demo: false, conn: 'wait', canWrite: true, isAdmin: false, myUid: null,
   project: {}, templates: { types: [] }, calendar: { holidays: [] },
-  people: [], tasks: [], meetings: [], issues: [], letters: [], reviews: [], duties: [],
+  people: [], tasks: [], meetings: [], issues: [], letters: [], reviews: [], duties: [], plan_updates: [], plan_sources: [], plan_versions: [], plan: null,
   peers: [], page: 'overview', drawer: null
 };
-A.COLLS = ['people', 'tasks', 'meetings', 'issues', 'letters', 'reviews', 'contacts', 'events', 'duties'];
+A.COLLS = ['people', 'tasks', 'meetings', 'issues', 'letters', 'reviews', 'contacts', 'events', 'duties', 'plan_updates', 'plan_sources', 'plan_versions'];
 A.newId = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
 A.byId = (coll, id) => S[coll].find(x => x.id === id);
 A.person = id => S.people.find(p => p.id === id);
@@ -83,7 +83,7 @@ function localApply(coll, id, data, merge) {
   else arr.push(Object.assign({ id }, data));
   A.schedule();
 }
-function deepMerge(t, s) { for (const k in s) { if (s[k] && typeof s[k] === 'object' && !Array.isArray(s[k]) && t[k] && typeof t[k] === 'object' && !Array.isArray(t[k])) t[k] = deepMerge(Object.assign({}, t[k]), s[k]); else t[k] = s[k]; } return t; }
+function deepMerge(t, s) { for (const k in s) { if (k.indexOf('.') > 0) { const ps = k.split('.'); let o = t; ps.slice(0, -1).forEach(p => { o[p] = Object.assign({}, o[p] && typeof o[p] === 'object' ? o[p] : {}); o = o[p]; }); o[ps[ps.length - 1]] = s[k]; continue; } if (s[k] && typeof s[k] === 'object' && !Array.isArray(s[k]) && t[k] && typeof t[k] === 'object' && !Array.isArray(t[k])) t[k] = deepMerge(Object.assign({}, t[k]), s[k]); else t[k] = s[k]; } return t; }
 const stamp = () => ({ updatedAt: new Date().toISOString(), updatedBy: S.myUid || null });
 
 A.put = async function (coll, id, data) {
@@ -121,6 +121,8 @@ async function boot() {
   if (!window.claude || typeof window.claude.use !== 'function') {
     if (location.protocol === 'file:') {
       await new Promise(r => { const sc = document.createElement('script'); sc.src = 'demo.js'; sc.onload = r; sc.onerror = r; document.head.append(sc); });
+      await new Promise(r => { const sc = document.createElement('script'); sc.src = 'demo_plan.js'; sc.onload = r; sc.onerror = r; document.head.append(sc); });
+      if (window.DEMO && window.DEMO_PLAN) Object.assign(window.DEMO, window.DEMO_PLAN);
       if (window.DEMO) { Object.assign(S, window.DEMO); S.demo = true; S.isAdmin = true;
         const q = new URLSearchParams(location.search); if (q.get('page')) S.page = q.get('page'); if (q.get('view')) S.schedView = q.get('view'); if (q.get('theme')) document.documentElement.dataset.theme = q.get('theme'); if (q.get('tab')) S.docTab = q.get('tab'); if (q.get('mv')) S.mView = q.get('mv'); }
     }
@@ -141,11 +143,11 @@ async function boot() {
   A.COLLS.forEach(c => {
     let got = false;
     db.collection(c).onSnapshot(snap => { const prev = S[c]; S[c] = snap.docs.map(d => Object.assign({ id: d.id }, d.data())); if (got) A.noteChanges(c, snap, prev); if (!got) { got = true; done(); } A.schedule(); },
-      () => { if (c === 'contacts' || c === 'events' || c === 'duties') { S[c + 'Err'] = true; if (!got) { got = true; done(); } return; } setConn('off', '同步中斷'); A.toast('資料同步中斷，請重新整理頁面。'); });
+      () => { if (c === 'contacts' || c === 'events' || c === 'duties' || c.indexOf('plan_') === 0) { S[c + 'Err'] = true; if (!got) { got = true; done(); } return; } setConn('off', '同步中斷'); A.toast('資料同步中斷，請重新整理頁面。'); });
   });
   let gotCfg = false;
   db.collection('config').onSnapshot(snap => {
-    snap.docs.forEach(d => { if (['project', 'templates', 'calendar'].includes(d.id)) S[d.id] = d.data() || {}; });
+    snap.docs.forEach(d => { if (['project', 'templates', 'calendar', 'plan'].includes(d.id)) S[d.id] = d.data() || {}; });
     if (!gotCfg) { gotCfg = true; done(); } A.schedule();
   }, () => {});
   setTimeout(() => { if (!S.ready) { S.ready = true; A.schedule(); } }, 6000);
@@ -168,6 +170,7 @@ A.PAGES = [
   ['schedule', '時程', '<path d="M4 7h9M4 12h16M4 17h6"/><circle cx="16.5" cy="7" r="2"/><circle cx="13.5" cy="17" r="2"/>'],
   ['meetings', '會議', '<rect x="3.5" y="5" width="17" height="15.5" rx="3"/><path d="M3.5 10h17M8 3v4M16 3v4"/>'],
   ['issues', '議題', '<path d="M12 3l8 4.5-8 4.5-8-4.5z"/><path d="M4 12l8 4.5 8-4.5M4 16.5L12 21l8-4.5"/>'],
+  ['plan', '草案修訂', '<path d="M8 3.5h7l3.5 3.5v10H8z"/><path d="M5.5 7v13.5h10"/><path d="M15 3.5V7h3.5M11 12.5h4.5M11 15h3"/>'],
   ['events', '大事紀', '<path d="M5 21V3.5"/><path d="M5 4h12l-2.5 4L17 12H5"/>'],
   ['docs', '文件', '<path d="M6 3.5h8l4 4V20.5H6z"/><path d="M14 3.5v4h4M9 12h6M9 16h4"/>'],
   ['contract', '契約', '<path d="M6 3.5h8l4 4V20.5H6z"/><path d="M14 3.5v4h4"/><path d="M9 14.5l2 2 4-4.5"/>'],
@@ -188,7 +191,7 @@ A.renderShell = function () {
 A.renderNav = function () {
   const nav = A.$('#nav'); nav.replaceChildren();
   const late = A.overdue ? A.overdue().length : 0;
-  const counts = { schedule: S.tasks.length || '', meetings: A.heldCount ? A.heldCount() + '/' + A.quotaTotal() : '', issues: S.issues.length || '', events: (S.events || []).length || '', docs: '', contract: A.dutyStats ? (x => x.total ? x.done + '/' + x.total : '')(A.dutyStats()) : '' };
+  const counts = { schedule: S.tasks.length || '', meetings: A.heldCount ? A.heldCount() + '/' + A.quotaTotal() : '', issues: S.issues.length || '', plan: (S.plan_updates || []).length || '', events: (S.events || []).length || '', docs: '', contract: A.dutyStats ? (x => x.total ? x.done + '/' + x.total : '')(A.dutyStats()) : '' };
   A.PAGES.forEach(([k, label, d]) => {
     const b = h('button', { type: 'button', 'aria-current': S.page === k ? 'page' : null, onclick: () => A.go(k) }, A.icon(d), label);
     if (k === 'overview' && late) b.append(h('span', { class: 'ct r' }, late));
@@ -299,7 +302,7 @@ A.peopleOpts = (blank) => [['', blank || '未指派'], ...S.people.map(p => [p.i
 A.openSearch = function () {
   document.querySelectorAll('.sr').forEach(x => x.remove());
   const box = h('div', { class: 'sr', onclick: e => { if (e.target === box) box.remove(); } });
-  const inp = h('input', { placeholder: '輸入關鍵字：會議、決議、議題、公文、工項…', id: 'search-in', 'aria-label': '搜尋' });
+  const inp = h('input', { placeholder: '輸入關鍵字：會議、決議、議題、公文、工項、草案條文…', id: 'search-in', 'aria-label': '搜尋' });
   const list = h('div', { class: 'srl' });
   // 會議紀錄全文平常不載入，打開搜尋時才讀一次
   if (!A.minAll && !A.minAllLoad) { A.minAllLoad = true; A.qAll('minutes').then(l => { A.minAll = l; if (document.body.contains(list)) run(); }).catch(() => { A.minAllLoad = false; }); }
@@ -314,6 +317,7 @@ A.openSearch = function () {
     const snip = s => { const k = s.toLowerCase().indexOf(q); return (k > 24 ? '…' : '') + s.slice(Math.max(0, k - 24), k + 48) + (k + 48 < s.length ? '…' : ''); };
     (A.minAll || []).forEach(v => { const p = (v.paras || []).find(x => hit(x)); if (!p) return; const mt = A.byId('meetings', v.meeting); res.push(['會議紀錄', (mt ? mt.title || '會議' : '會議') + '．第 ' + v.ver + ' 版', snip(p), () => A.viewMinutes(mt || { id: v.meeting }, v.ver, 'full')]); });
     (S.events || []).forEach(e => { if (hit(e.title) || hit(e.detail)) res.push(['大事紀', e.title || '', (e.date ? A.md(e.date) + '　' : '') + (e.detail || '').slice(0, 40), () => A.openDrawer('event', e.id)]); });
+    (S.plan_updates || []).forEach(u => { if (hit(u.no) || hit(u.newText) || hit(u.oldText) || hit(u.srcName) || hit(u.srcOrg)) { const f = [u.newText, u.oldText, u.srcName, u.srcOrg].find(hit) || ''; res.push(['草案修訂', u.no + '　' + String(u.section || '').split('／')[0] + '．' + (u.kind || ''), snip(String(f)), () => A.openDrawer('planrow', u.id)]); } });
     (S.contacts || []).forEach(c => { if (hit(c.name) || hit(c.org) || hit(c.note)) res.push(['聯絡人', c.name || '', [c.org, c.title, c.phone].filter(Boolean).join('．'), () => A.openDrawer('contact', c.id)]); });
     S.reviews.forEach(r => { if (hit(r.opinion) || hit(r.response) || hit(r.who)) res.push(['審查意見', (r.report || '審查意見') + (r.who ? '．' + r.who : ''), (r.opinion || '').slice(0, 80), () => A.openDrawer('review', r.id)]); });
     (S.duties || []).forEach(x => { if (hit(x.name) || hit(x.note) || hit(x.evid)) res.push(['契約事項', x.name || '', [x.qty ? x.qty + (x.unit || '') : '', x.note].filter(Boolean).join('．'), () => A.openDrawer('duty', x.id)]); });
@@ -353,8 +357,8 @@ A.exportCSV = async function (name, rows) {
 const myDel = new Set();
 let savedT = 0;
 A.saved = function () { clearTimeout(savedT); savedT = setTimeout(() => { if (!document.querySelector('.toast')) A.toast('已儲存'); }, 250); };
-const COLL_LB = { tasks: '工項', meetings: '會議', issues: '議題', letters: '公文', reviews: '審查意見', people: '成員', contacts: '聯絡人', events: '大事紀', duties: '契約事項' };
-const KIND = { tasks: 'task', meetings: 'meeting', issues: 'issue', letters: 'letter', reviews: 'review', contacts: 'contact', events: 'event', duties: 'duty' };
+const COLL_LB = { tasks: '工項', meetings: '會議', issues: '議題', letters: '公文', reviews: '審查意見', people: '成員', contacts: '聯絡人', events: '大事紀', duties: '契約事項', plan_updates: '草案修訂' };
+const KIND = { tasks: 'task', meetings: 'meeting', issues: 'issue', letters: 'letter', reviews: 'review', contacts: 'contact', events: 'event', duties: 'duty', plan_updates: 'planrow' };
 const recName = d => (d && (d.title || d.name || d.subject || d.no)) || '';
 let noteQ = [], noteT = 0;
 A.noteChanges = function (c, snap, prev) {
