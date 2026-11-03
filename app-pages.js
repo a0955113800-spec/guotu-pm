@@ -405,7 +405,7 @@ function ganttView(ts) {
   const top = h('div', { class: 'gx-top' }, h('div', null, h('b', null, '時程甘特圖'), sub), h('div', { class: 'gx-ctl' }, seg, h('button', { class: 'btn sm', type: 'button', onclick: toToday }, '定位到今天'), h('label', { class: 'gx-chk' }, own, '顯示負責人'), chk('gLinks', 'gt-gl', '顯示相依連線'), chk('gCrit', 'gt-gc', '只看關鍵工項'),
     h('button', { class: 'btn sm', type: 'button', onclick: () => A.ganttExport('pdf') }, '匯出 PDF'), h('button', { class: 'btn sm', type: 'button', onclick: () => A.ganttExport('print') }, '列印')));
   const lg = h('div', { class: 'gx-lg' }, h('span', null, h('i', { class: 'sw st-未開始' }), '未開始'), h('span', null, h('i', { class: 'sw' }), '進行中'), h('span', null, h('i', { class: 'sw st-待確認' }), '待確認'), h('span', null, h('i', { class: 'sw done' }), '完成'), h('i', { class: 'sep' }),
-    h('span', null, h('i', { class: 'sw late' }), '已逾期'), h('span', null, h('i', { class: 'sw crit' }), '關鍵'), h('span', null, h('i', { class: 'tdl' }), '今天'), h('span', null, h('i', { class: 'msl' }), '契約交付期限'), h('span', null, h('i', { class: 'lnk' }), '前置 → 後續'), h('span', null, '⚠ 前置延誤'));
+    h('span', null, h('i', { class: 'sw late' }), '已逾期'), h('span', null, h('i', { class: 'sw crit' }), '關鍵'), h('span', null, h('i', { class: 'sw ext' }), '署方排程'), h('span', null, h('i', { class: 'tdl' }), '今天'), h('span', null, h('i', { class: 'msl' }), '契約交付期限'), h('span', null, h('i', { class: 'lnk' }), '前置 → 後續'), h('span', null, '⚠ 前置延誤'));
   const wrap = h('div', { class: 'gx' }, top, lg, box);
   if (!dated.length) { box.append(emptyBox('沒有填日期的工項', '在工項裡填上開始與期限，就會出現在甘特圖上。')); return wrap; }
   let min = td, max = td;
@@ -451,7 +451,7 @@ function ganttView(ts) {
     const tr = track(), s = t.start || t.due, e = t.due || t.start, a = s <= e ? s : e, b = s <= e ? e : s;
     const os = (t.owners || []).map(A.pname).filter(Boolean), st = t.status || '未開始';
     const bl = x(a) + 1, bw = Math.max(x(b) - x(a) + DW - 2, 6);
-    const bar = h('div', { class: 'gx-bar st-' + st + (st === '完成' ? ' done' : '') + (late(t) ? ' late' : '') + (t.crit ? ' crit' : ''), style: 'left:' + bl + 'px;width:' + bw + 'px', title: t.title + '\n' + (os.join('、') || '未指派') + '｜' + st + '\n' + (t.start ? A.md(t.start) : '—') + ' → ' + (t.due ? A.md(t.due) : '—') + (t.crit ? '\n關鍵工項' : '') });
+    const ext = t.ext || /^署方[：:]/.test(String(t.title || '')); const bar = h('div', { class: 'gx-bar st-' + st + (st === '完成' ? ' done' : '') + (late(t) ? ' late' : '') + (t.crit ? ' crit' : '') + (ext ? ' ext' : ''), style: 'left:' + bl + 'px;width:' + bw + 'px', title: t.title + '\n' + (os.join('、') || '未指派') + '｜' + st + '\n' + (t.start ? A.md(t.start) : '—') + ' → ' + (t.due ? A.md(t.due) : '—') + (t.crit ? '\n關鍵工項' : '') });
     if (st === '完成' && bw >= 18) bar.append(h('span', { class: 'gx-ok' }, '✓'));
     tr.append(bar);
     const tx = h('span', { class: 'gx-tx' + (late(t) ? ' late' : '') }, h('b', null, t.due ? A.md(t.due) : ''), S.gOwn ? (os.length ? os.join('、') : h('em', null, '未指派')) : '');
@@ -1777,9 +1777,9 @@ function exportDuties() {
   A.exportCSV('國土通檢_契約應辦事項', [['類別', '項目', '契約數量', '單位', '完成情形', '期限', '負責', '狀態', '規格說明', '驗收佐證'], ...A.dutyRows().map(r => [r.cat, r.name, r.qty || '', r.unit, r.doneTxt, r.auto === 'meet' ? '履約期間' : A.roc(r.due), A.pname(r.owner), r.state, r.note || '', r.evid || ''])]);
 }
 
-/* ---------- 草案修訂：全國國土計畫通檢草案 2050 第五版的更新對照、資料來源、更新歷程 ---------- */
-const PLK = ['議題案更新', '公開統計更新', '圖資更新', '我方研判', '待索取', '機關改制'];
-const PLC = { '議題案更新': 'pl-c1', '公開統計更新': 'pl-c2', '圖資更新': 'pl-c3', '我方研判': 'pl-c4', '待索取': 'pl-c5', '機關改制': 'pl-c6' };
+/* ---------- 草案修訂：全國國土計畫通檢草案 2050 目前版次（動態，見 plEd）的更新對照、資料來源、更新歷程 ---------- */
+const PLK = ['議題案更新', '公開統計更新', '圖資更新', '我方研判', '待索取', '機關改制', '署版已修'];
+const PLC = { '議題案更新': 'pl-c1', '公開統計更新': 'pl-c2', '圖資更新': 'pl-c3', '我方研判': 'pl-c4', '待索取': 'pl-c5', '機關改制': 'pl-c6', '署版已修': 'pl-c7' };
 const PL_METHODS = [
   { name: '數據替換', scope: '第一～三章', text: '原句型保留，只換數字、年份與資料來源；每個數字都能回溯到圖層版本或統計表。' },
   { name: '條文置換', scope: '第四～七章', text: '以成大總結報告表 2.5.1「建議修正方向」及議題 22、23 的內容逐條取代原條文，照成大原文；成大未定案處不自創條文，以橘字寫「待研議」與我方研判方向。' },
@@ -1790,9 +1790,23 @@ const PL_AUTHORS = [
   { kind: '圖資更新', colorName: '藍字', rule: '依本公司現有圖資計算或更新，註解寫圖層與版本' },
   { kind: '我方研判', colorName: '橘字', rule: '成大未定案、待研議之我方補寫，註解寫研判依據' },
   { kind: '待索取', colorName: '黃底黑字', rule: '保留原數字、待函請機關提供，註解寫 D 編號與機關' },
-  { kind: '機關改制', colorName: '紫字（舊名刪除線）', rule: '依機關改制日期替換機關名稱' }];
+  { kind: '機關改制', colorName: '紫字（舊名刪除線）', rule: '依機關改制日期替換機關名稱' },
+  { kind: '署版已修', colorName: '灰字', rule: '國土署承辦提供之草案初稿（署版）相對 107 年版已修改處，註解寫「署版初稿已修」；署方內文紅字為其修改標記，本公司不沿用' }];
 const PL_STAT = ['未索取', '已索取', '已收到'];
-const plU = () => S.plan_updates || [];
+/* 版次：優先 S.project.planEdition，其次 plan_versions 最後一筆（seq 最大）的 edition 或 ver（v數字），再其次 plan_updates 最大 edition，預設 5 */
+function plEd() {
+  const p = Number((S.project || {}).planEdition); if (p > 0) return p;
+  const vs = [...(S.plan_versions || [])].sort((a, b) => (a.seq || 0) - (b.seq || 0) || (String(a.ver) < String(b.ver) ? -1 : 1)), last = vs[vs.length - 1];
+  if (last) { const e = Number(last.edition) || Number((String(last.ver || '').match(/^v(\d+)$/) || [])[1]); if (e > 0) return e; }
+  const m = Math.max(0, ...(S.plan_updates || []).map(u => Number(u.edition) || 0)); return m > 0 ? m : 5;
+}
+const plEdOf = u => Number(u.edition) || 5;
+const plEdLabel = () => { const n = plEd(); return '第' + (n >= 1 && n <= 10 ? '一二三四五六七八九十'[n - 1] : n) + '版'; };
+const plPage = u => u.pageV ? String(u.pageV) : 'v' + plEdOf(u) + ' p.' + u.pageV5;
+const plPrintTxt = u => u.pagePrint ? '印刷 ' + u.pagePrint : '';
+const plAll = () => S.plan_updates || [];
+const plHidden = () => { const e = plEd(); return plAll().filter(u => plEdOf(u) < e); };
+const plU = () => { const e = plEd(), pf = S.pf; return (pf && pf.old) ? plAll() : plAll().filter(u => plEdOf(u) >= e); };
 const plTop = u => { const s = String(u.section || '').split('／')[0].trim(); return !s || s === '（未分節）' ? '（本章未分節）' : s; };
 const plSecLabel = u => plTop(u) === '（本章未分節）' ? plCh(u.chapter) + ' ' + (u.chapterName || '') : plCh(u.chapter) + ' ' + plTop(u);
 const plSub = u => String(u.section || '').split('／').slice(1).join('／');
@@ -1805,7 +1819,7 @@ const plMe = () => A.pname(A.meId()) || window.FB_NAME || window.FB_EMAIL || '�
 function plPf() {
   if (!S.pf) {
     let tab = 'diff'; try { tab = localStorage.getItem('gt-plt') || 'diff'; } catch (_) {}
-    S.pf = { tab, cats: [], ch: '', sec: '', pend: false, doubt: false, unrev: false, issue: '', src: '', q: '', open: {} };
+    S.pf = { tab, cats: [], ch: '', sec: '', pend: false, doubt: false, unrev: false, old: false, issue: '', src: '', q: '', open: {} };
     if (S.demo) {
       const q = new URLSearchParams(location.search), p = S.pf;
       if (q.get('ptab')) p.tab = q.get('ptab');
@@ -1885,7 +1899,7 @@ function plFillTop(box) {
   const st = plStats(), pf = plPf(), B = x => h('b', null, String(x));
   const sep = () => h('span', { class: 'pl-dotsep' }, '・');
   box.replaceChildren(
-    h('div', { class: 'pl-status', role: 'status' }, '第五版', sep(), B(st.total), ' 處更新', sep(), '待索取 ', B(st.c['待索取']), sep(), '來源待補 ', B(st.tbd), sep(), '已審閱 ', B(st.rev), st.doubt ? [sep(), h('span', { class: 'pl-q' }, '有疑問 ', B(st.doubt))] : ''),
+    h('div', { class: 'pl-status', role: 'status' }, plEdLabel(), sep(), B(st.total), ' 處更新', plPf().old ? [sep(), '含舊版'] : (plHidden().length ? [sep(), h('span', { class: 'muted' }, '另 ' + plHidden().length + ' 處屬舊版（已隱藏）')] : ''), sep(), '待索取 ', B(st.c['待索取']), sep(), '來源待補 ', B(st.tbd), sep(), '已審閱 ', B(st.rev), st.doubt ? [sep(), h('span', { class: 'pl-q' }, '有疑問 ', B(st.doubt))] : ''),
     h('div', { class: 'pl-pills' }, PLK.map(k => h('button', { type: 'button', class: 'pl-pill ' + PLC[k], 'aria-pressed': String(pf.cats.includes(k)), title: '只看「' + k + '」，可複選',
       onclick: () => { pf.cats = pf.cats.includes(k) ? pf.cats.filter(x => x !== k) : pf.cats.concat(k); if (pf.tab !== 'diff') { pf.tab = 'diff'; try { localStorage.setItem('gt-plt', 'diff'); } catch (_) {} A.render(); } else plRedraw(); } }, k, h('b', null, String(st.c[k]))))));
 }
@@ -1905,7 +1919,7 @@ function plFillFilter(box) {
   const srcS = pf.src ? (S.plan_sources || []).find(s => s.id === pf.src) : null;
   box.replaceChildren(
     mk(chOpts, pf.ch, v => { pf.ch = v; pf.sec = ''; plRedraw(); }, '章'), mk(secOpts, pf.sec, v => { pf.sec = v; plRedraw(); }, '節'), mk(isOpts, pf.issue, v => { pf.issue = v; plRedraw(); }, '成大議題'),
-    ck('只看待確認', 'pend'), ck('只看有疑問', 'doubt'), ck('只看未審閱', 'unrev'), q,
+    ck('只看待確認', 'pend'), ck('只看有疑問', 'doubt'), ck('只看未審閱', 'unrev'), plHidden().length ? ck('含舊版', 'old') : '', q,
     srcS ? h('button', { type: 'button', class: 'pl-chip', title: '取消來源篩選', onclick: () => { pf.src = ''; plRedraw(); } }, '來源：' + cut(srcS.name, 26) + ' ×') : '',
     plHasFilter(pf) ? h('button', { class: 'btn sm', type: 'button', onclick: () => { plClear(); plRedraw(); } }, '清除篩選') : '');
 }
@@ -1930,12 +1944,12 @@ function plFillList(box) {
   });
   box.replaceChildren(h('div', { class: 'tbl mc pl-tbl' }, h('table', { class: 'pl-t' },
     h('colgroup', null, h('col', { style: 'width:124px' }), h('col', { style: 'width:98px' }), h('col'), h('col'), h('col', { style: 'width:178px' }), h('col', { style: 'width:46px' })),
-    h('thead', null, h('tr', null, ['位置', '類別', '原文（107 年版）', '更新後（v5）', '來源', '審閱'].map(x => h('th', null, x)))), tb)));
+    h('thead', null, h('tr', null, ['位置', '類別', plEd() >= 6 ? '原文（107 年版／署版）' : '原文（107 年版）', '更新後（v' + plEd() + '）', '來源', '審閱'].map(x => h('th', null, x)))), tb)));
 }
 function plRow(u) {
   const sub = plSub(u), src = plSrcLine(u), po = String(u.pageOrig || '');
   return h('tr', { class: 'click pl-r ' + (PLC[u.kind] || ''), 'data-id': u.id, onclick: () => A.openDrawer('planrow', u.id) },
-    h('td', { class: 'pl-pos mm1' }, h('b', null, u.no), editDot('planrow:' + u.id), h('small', null, 'v5 p.' + u.pageV5), h('small', null, '印刷 ' + u.pagePrint), h('small', null, /^\d/.test(po) ? '原 p.' + po : po.replace(/（.*$/, '')), sub ? h('em', null, sub) : ''),
+    h('td', { class: 'pl-pos mm1' }, h('b', null, u.no), editDot('planrow:' + u.id), h('small', null, plPage(u)), plPrintTxt(u) ? h('small', null, plPrintTxt(u)) : '', h('small', null, /^\d/.test(po) ? '原 p.' + po : po.replace(/（.*$/, '')), sub ? h('em', null, sub) : ''),
     h('td', { class: 'pl-k' }, h('div', { class: 'pl-kw' }, plTagK(u.kind), u.pending ? h('span', { class: 'pl-pend', title: '待確認：含待索取、待補、待更新或待確認事項' }, '待確認') : '')),
     h('td', { class: 'pl-txt mw', 'data-l': '原文' }, plOld(u, 160)), h('td', { class: 'pl-txt mw', 'data-l': '更新後' }, plNew(u, 160)),
     h('td', { class: 'pl-src mw', 'data-l': '來源' }, src.map((x, i) => h('span', { class: i === 1 ? 'n' : null }, x))), h('td', { class: 'pl-rvc' }, plRv(u)));
@@ -1947,22 +1961,22 @@ function plRedraw(which) {
   plFillList(l);
 }
 function plExport() {
-  const rows = plFiltered(), out = [['編號', '章', '節', 'v5頁', '印刷頁', '原頁', '類別', '原文', '更新後', '來源機關', '來源名稱', '年期', '網址', '口徑', '備註', '待確認', '審閱']];
-  rows.forEach(u => out.push([u.no, plCh(u.chapter) + ' ' + u.chapterName, u.section, u.pageV5, u.pagePrint, u.pageOrig, u.kind, u.oldText, u.newText, u.srcOrg, u.srcName, u.srcYear, (u.srcUrls || [u.srcUrl]).join(' '), u.srcNote, u.note, u.pending ? '是' : '', plState(u) === 'doubt' ? '有疑問' : plState(u) === 'ok' ? '已審閱' : '']));
+  const rows = plFiltered(), out = [['編號', '章', '節', '版本頁', '印刷頁', '原頁', '類別', '原文', '更新後', '來源機關', '來源名稱', '年期', '網址', '口徑', '備註', '待確認', '審閱']];
+  rows.forEach(u => out.push([u.no, plCh(u.chapter) + ' ' + u.chapterName, u.section, plPage(u), u.pagePrint, u.pageOrig, u.kind, u.oldText, u.newText, u.srcOrg, u.srcName, u.srcYear, (u.srcUrls || [u.srcUrl]).join(' '), u.srcNote, u.note, u.pending ? '是' : '', plState(u) === 'doubt' ? '有疑問' : plState(u) === 'ok' ? '已審閱' : '']));
   A.exportCSV('國土通檢_草案修訂對照_' + today().replace(/-/g, ''), out);
 }
 
 /* ---- 頁面 ---- */
 A.pages.plan = function (frag) {
   const pf = plPf();
-  frag.append(h('div', { class: 'page-h' }, h('div', null, h('h1', null, '草案修訂'), h('p', null, '《全國國土計畫通檢草案 2050》第五版相對 107 年公告版的更新對照、資料來源與更新歷程。')),
+  frag.append(h('div', { class: 'page-h' }, h('div', null, h('h1', null, '草案修訂'), h('p', null, '《全國國土計畫通檢草案 2050》' + plEdLabel() + '相對 107 年公告版的更新對照、資料來源與更新歷程。')),
     h('div', { class: 'act' }, pf.tab === 'diff' && plU().length ? h('button', { class: 'btn', type: 'button', onclick: plExport }, '匯出 CSV') : '')));
   if (!readyGate(frag)) return;
   if (S.plan_updatesErr) { frag.append(card(h('div'), emptyBox('草案修訂還不能使用', '請管理者到 Firebase 確認 Firestore 安全規則是通用版（成員可讀寫 config、users、presence 以外的集合），再重新整理。'))); return; }
-  if (!plU().length) { frag.append(card(h('div'), emptyBox('草案修訂資料還沒匯入', '管理者到「後台」→「匯入資料」，選擇「匯入資料_草案修訂_1151030.json」，匯入後這裡就會出現。'))); return; }
+  if (!plU().length) { frag.append(card(h('div'), emptyBox('草案修訂資料還沒匯入', '管理者到「後台」→「匯入資料」，選擇最新的「匯入資料_草案修訂_…json」，匯入後這裡就會出現。'))); return; }
   const top = h('div', { id: 'pl-top' }); plFillTop(top);
   const seg = h('div', { class: 'seg' }, [['diff', '更新對照'], ['src', '資料來源'], ['hist', '更新歷程']].map(([k, t]) => h('button', { type: 'button', 'aria-pressed': String(pf.tab === k), onclick: () => plSetTab(k) }, t)));
-  frag.append(card(h('div', { class: 'ch' }, h('h2', null, '第五版更新總覽'), h('div', { class: 'r' }, seg)), h('div', { class: 'pad' }, top)));
+  frag.append(card(h('div', { class: 'ch' }, h('h2', null, plEdLabel() + '更新總覽'), h('div', { class: 'r' }, seg)), h('div', { class: 'pad' }, top)));
   if (pf.tab === 'src') { plSourcesView(frag); return; }
   if (pf.tab === 'hist') { plHistView(frag); return; }
   const fl = h('div', { id: 'pl-filter', class: 'pl-fl' }), ls = h('div', { id: 'pl-list' });
@@ -2035,8 +2049,9 @@ function plHistView(frag) {
   })))));
   const m = (S.plan && S.plan.methods && S.plan.methods.length) ? S.plan.methods : PL_METHODS;
   frag.append(card(chead('三種更新方式', '怎麼改'), h('div', { class: 'pad pl-ms' }, m.map(x => h('div', { class: 'pl-m' }, h('div', null, h('b', null, x.name), x.scope ? h('span', { class: 'tag' }, x.scope) : ''), h('p', null, x.text))))));
-  const au = (S.plan && S.plan.authors && S.plan.authors.length) ? S.plan.authors : PL_AUTHORS;
-  frag.append(card(chead('字色與修訂作者對照', 'v5 的 Word 追蹤修訂依字色分作者；點處數可到對照表只看該類'),
+  let au = (S.plan && S.plan.authors && S.plan.authors.length) ? S.plan.authors : PL_AUTHORS;
+  if (!au.some(a => a.kind === '署版已修')) au = au.concat(PL_AUTHORS.filter(a => a.kind === '署版已修'));
+  frag.append(card(chead('字色與修訂作者對照', 'v' + plEd() + ' 的 Word 字色依來源分類（註解作者同）；點處數可到對照表只看該類'),
     h('div', { class: 'tbl mc' }, h('table', { class: 'pl-st' }, h('thead', null, h('tr', null, ['字色', '類別（修訂作者）', '用法', '處數'].map(x => h('th', null, x)))),
       h('tbody', null, au.map(a => h('tr', { class: PLC[a.kind] || '' }, h('td', { class: 'mm1' }, h('span', { class: 'pl-sw' + (a.kind === '待索取' ? ' y' : '') }), ' ', a.colorName || ''), h('td', null, plTagK(a.kind)), h('td', { style: 'font-size:13px;line-height:1.6' }, a.rule),
         h('td', null, h('button', { type: 'button', class: 'tag t-teal pl-lk', onclick: () => { plClear(); plPf().cats = [a.kind]; plSetTab('diff'); } }, (st.c[a.kind] || 0) + ' 處')))))))));
@@ -2061,9 +2076,9 @@ A.drawers.planrow = function (id) {
   const act = (ok, label) => h('button', { type: 'button', class: 'pl-ob ' + (ok ? 'ok' : 'doubt'), 'aria-pressed': String(!!mine && mine.ok === ok), onclick: async () => { if (!ok && !ta.value.trim()) { A.toast('有疑問請先在上方留言寫明問題。'); ta.focus(); return; } await plSaveReview(u, ok, ta.value); } }, label);
   const rvList = revs.length ? h('div', { class: 'pl-rvs' }, revs.map(r => h('div', { class: 'pl-rvi' }, h('span', { class: 'pl-rv ' + (r.ok ? 'ok' : 'doubt') }, r.ok ? '✓' : '!'), h('div', null, h('b', null, r.name || '同仁'), h('span', { class: 'tag ' + (r.ok ? 't-good' : 't-warn'), style: 'margin-left:6px' }, r.ok ? '同意' : '有疑問'), h('small', null, r.at ? new Date(r.at).toLocaleString('zh-TW', { hour12: false }) : ''), r.note ? h('p', null, r.note) : '')))) : h('p', { class: 'muted', style: 'margin:0;font-size:13px' }, '還沒有人審閱這一處。');
   return { title: u.no + '　' + plSecLabel(u), body: [
-    h('div', { class: 'pl-dh ' + (PLC[u.kind] || '') }, plTagK(u.kind), u.pending ? h('span', { class: 'pl-pend' }, '待確認') : '', h('span', { class: 'pl-posl' }, plCh(u.chapter) + (plSub(u) ? '　' + plSub(u) : '')), h('span', { class: 'pl-posl num' }, 'v5 p.' + u.pageV5 + '（印刷 ' + u.pagePrint + '）　原 p.' + String(u.pageOrig).replace(/（.*$/, '')), editDot('planrow:' + u.id)),
-    sec('原文（107 年版）', h('div', { class: 'pl-full ' + (PLC[u.kind] || '') }, plOld(u))),
-    sec('更新後（v5）', h('div', { class: 'pl-full ' + (PLC[u.kind] || '') }, plNew(u))),
+    h('div', { class: 'pl-dh ' + (PLC[u.kind] || '') }, plTagK(u.kind), u.pending ? h('span', { class: 'pl-pend' }, '待確認') : '', h('span', { class: 'pl-posl' }, plCh(u.chapter) + (plSub(u) ? '　' + plSub(u) : '')), h('span', { class: 'pl-posl num' }, plPage(u) + (u.pagePrint ? '（印刷 ' + u.pagePrint + '）' : '') + (u.pageOrig ? '　原 p.' + String(u.pageOrig).replace(/（.*$/, '') : '')), editDot('planrow:' + u.id)),
+    sec(plEd() >= 6 ? '原文（107 年版／署版）' : '原文（107 年版）', h('div', { class: 'pl-full ' + (PLC[u.kind] || '') }, plOld(u))),
+    sec('更新後（v' + plEdOf(u) + '）', h('div', { class: 'pl-full ' + (PLC[u.kind] || '') }, plNew(u))),
     sec('來源', kv('機關／出處', u.srcOrgW || u.srcOrg), kv('名稱', u.srcNameW || u.srcName), kv('年期／版本', u.srcYearW || u.srcYear), urls.length ? A.field('網址', h('div', { class: 'pl-urls pl-stk' }, urls.map(x => h('a', { href: x, target: '_blank', rel: 'noopener' }, x))), true) : '', kv('口徑', u.srcMethodW || (u.srcNote ? cut(u.srcNote, 60) : '')),
       u.srcTbd ? h('div', { class: 'rk warn' }, ic(I_ALERT), '這一處的網址或年期尚未補上（清冊標「來源待補」）。') : '',
       h('details', { class: 'pl-det' }, h('summary', null, '作業細節（原始來源欄位、計算口徑全文、備註、核對紀錄）'),
