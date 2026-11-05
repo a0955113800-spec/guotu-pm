@@ -40,6 +40,7 @@ jobs:
           const SITE = process.env.SITE, PREFIX = process.env.PREFIX;
           const DRY = process.env.DRY === '1';
 
+          try {
           // 1. 收集要上線的檔案（排除 git 與設定用檔案）
           const SKIP = /^(\.git|\.github|\.claude|node_modules)(\/|$)|^(README|LICENSE)/i;
           const files = {}, blobs = {};
@@ -57,7 +58,9 @@ jobs:
 
           // 2. 用服務帳戶金鑰換取權杖
           if (!process.env.SA_JSON) throw new Error('缺少祕密 FIREBASE_SERVICE_ACCOUNT');
-          const sa = JSON.parse(process.env.SA_JSON);
+          let sa; try { sa = JSON.parse(process.env.SA_JSON); } catch (_) { throw new Error('祕密 FIREBASE_SERVICE_ACCOUNT 不是完整的 JSON（請整份貼上金鑰檔內容）'); }
+          if (!sa.client_email || !sa.private_key) throw new Error('祕密裡缺少 client_email 或 private_key，可能貼錯檔案');
+          console.log('服務帳戶：' + sa.client_email + '（專案 ' + sa.project_id + '）');
           const b64u = s => Buffer.from(s).toString('base64url');
           const now = Math.floor(Date.now() / 1000);
           const unsigned = b64u(JSON.stringify({ alg: 'RS256', typ: 'JWT' })) + '.' + b64u(JSON.stringify({
@@ -114,5 +117,9 @@ jobs:
           await call('PATCH', ver + '?update_mask=status', { status: 'FINALIZED' });
           const rel = await call('POST', 'sites/' + SITE + '/releases?versionName=' + encodeURIComponent(ver), { message: 'GitHub ' + (process.env.GITHUB_SHA || '').slice(0, 7) });
           console.log('已上線：' + rel.name);
+          } catch (e) {
+            console.log('::error title=部署失敗::' + String(e && e.message || e).split(String.fromCharCode(10)).join(' ').slice(0, 1500));
+            process.exit(1);
+          }
           JS
           node /tmp/hosting-patch.mjs
