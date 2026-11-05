@@ -1,0 +1,118 @@
+# GitHub 的 main 一更新，就把這個儲存庫的檔案部署到 https://guotu-pm.web.app/guotu-pm/
+# 只替換 /guotu-pm/ 底下的檔；同一個 Firebase 網站上的其他路徑（例如 /ai-board/）與轉址設定原樣保留。
+# 需要的祕密：FIREBASE_SERVICE_ACCOUNT（具「Firebase Hosting 管理員」角色的服務帳戶 JSON 金鑰全文）
+name: 部署到 Firebase
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: firebase-hosting
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: 只更新 /guotu-pm/ 底下的檔案
+        env:
+          SA_JSON: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+          SITE: guotu-pm
+          PREFIX: /guotu-pm/
+        run: |
+          cat > /tmp/hosting-patch.mjs <<'JS'
+          import crypto from 'node:crypto';
+          import zlib from 'node:zlib';
+          import fs from 'node:fs';
+          import path from 'node:path';
+
+          const SITE = process.env.SITE, PREFIX = process.env.PREFIX;
+          const DRY = process.env.DRY === '1';
+
+          // 1. 收集要上線的檔案（排除 git 與設定用檔案）
+          const SKIP = /^(\.git|\.github|\.claude|node_modules)(\/|$)|^(README|LICENSE)/i;
+          const files = {}, blobs = {};
+          for (const rel of fs.readdirSync('.', { recursive: true })) {
+            const p = rel.split(path.sep).join('/');
+            if (SKIP.test(p) || !fs.statSync(p).isFile()) continue;
+            const gz = zlib.gzipSync(fs.readFileSync(p), { level: 9 });
+            const hash = crypto.createHash('sha256').update(gz).digest('hex');
+            files[PREFIX + p] = hash; blobs[hash] = gz;
+          }
+          const names = Object.keys(files).sort();
+          console.log('要部署的檔案 ' + names.length + ' 個：\n  ' + names.join('\n  '));
+          if (!names.includes(PREFIX + 'index.html')) throw new Error('找不到 index.html，停止部署');
+          if (DRY) process.exit(0);
+
+          // 2. 用服務帳戶金鑰換取權杖
+          if (!process.env.SA_JSON) throw new Error('缺少祕密 FIREBASE_SERVICE_ACCOUNT');
+          const sa = JSON.parse(process.env.SA_JSON);
+          const b64u = s => Buffer.from(s).toString('base64url');
+          const now = Math.floor(Date.now() / 1000);
+          const unsigned = b64u(JSON.stringify({ alg: 'RS256', typ: 'JWT' })) + '.' + b64u(JSON.stringify({
+            iss: sa.client_email, aud: 'https://oauth2.googleapis.com/token', iat: now, exp: now + 3600,
+            scope: 'https://www.googleapis.com/auth/cloud-platform https://www.googleapis.com/auth/firebase' }));
+          const sig = crypto.createSign('RSA-SHA256').update(unsigned).sign(sa.private_key, 'base64url');
+          const tk = await (await fetch('https://oauth2.googleapis.com/token', { method: 'POST',
+            headers: { 'content-type': 'application/x-www-form-urlencoded' },
+            body: new URLSearchParams({ grant_type: 'urn:ietf:params:oauth:grant-type:jwt-bearer', assertion: unsigned + '.' + sig }) })).json();
+          if (!tk.access_token) throw new Error('取得權杖失敗：' + (tk.error_description || tk.error || 'unknown'));
+          const AUTH = 'Bearer ' + tk.access_token;
+          const API = 'https://firebasehosting.googleapis.com/v1beta1/';
+          async function call(method, url, body) {
+            const r = await fetch(url.startsWith('http') ? url : API + url, { method,
+              headers: { authorization: AUTH, 'content-type': 'application/json' }, body: body ? JSON.stringify(body) : undefined });
+            const t = await r.text();
+            if (!r.ok) throw new Error(method + ' ' + url + ' → ' + r.status + ' ' + t);
+            return t ? JSON.parse(t) : {};
+          }
+
+          // 3. 複製目前線上版本，但拿掉 /guotu-pm/ 底下的舊檔
+          const live = await call('GET', 'sites/' + SITE + '/channels/live');
+          const src = live.release && live.release.version && live.release.version.name;
+          if (!src) throw new Error('讀不到目前線上版本');
+          console.log('目前線上版本：' + src);
+          const esc = PREFIX.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+          let op = await call('POST', 'sites/' + SITE + '/versions:clone', { sourceVersion: src, finalize: false, exclude: { regexes: ['^' + esc] } });
+          for (let i = 0; !op.done; i++) {
+            if (i > 90) throw new Error('複製版本逾時');
+            await new Promise(r => setTimeout(r, 2000));
+            op = await call('GET', op.name);
+          }
+          if (op.error) throw new Error('複製版本失敗：' + JSON.stringify(op.error));
+          const ver = op.response.name;
+          console.log('新版本：' + ver);
+
+          // 4. 放入這次的檔案（內容沒變的不會重傳）
+          const pop = await call('POST', ver + ':populateFiles', { files });
+          const need = pop.uploadRequiredHashes || [];
+          for (const h of need) {
+            const r = await fetch(pop.uploadUrl + '/' + h, { method: 'POST', headers: { authorization: AUTH, 'content-type': 'application/octet-stream' }, body: blobs[h] });
+            if (!r.ok) throw new Error('上傳失敗 ' + h + ' → ' + r.status + ' ' + await r.text());
+          }
+          console.log('上傳 ' + need.length + ' 個有變動的檔案');
+
+          // 5. 核對：其他路徑的檔案要還在
+          let all = [], tok = '';
+          do { const pg = await call('GET', ver + '/files?pageSize=1000' + (tok ? '&pageToken=' + tok : '')); all = all.concat(pg.files || []); tok = pg.nextPageToken || ''; } while (tok);
+          const mine = all.filter(f => f.path.startsWith(PREFIX)).length;
+          console.log('新版本共 ' + all.length + ' 個檔案，其中 ' + PREFIX + ' 底下 ' + mine + ' 個、其他路徑 ' + (all.length - mine) + ' 個');
+          if (mine !== names.length) throw new Error(PREFIX + ' 底下的檔案數不符，停止上線');
+
+          // 6. 定版並上線
+          await call('PATCH', ver + '?update_mask=status', { status: 'FINALIZED' });
+          const rel = await call('POST', 'sites/' + SITE + '/releases?versionName=' + encodeURIComponent(ver), { message: 'GitHub ' + (process.env.GITHUB_SHA || '').slice(0, 7) });
+          console.log('已上線：' + rel.name);
+          JS
+          node /tmp/hosting-patch.mjs
