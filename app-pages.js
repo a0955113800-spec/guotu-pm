@@ -638,24 +638,43 @@ A.pages.issues = function (frag) {
   frag.append(card(chead('24 項重要議題', '點一列看導讀內容與歷次討論'), h('div', { class: 'tbl mc', style: 'margin-top:10px' }, h('table', null, h('thead', null, h('tr', null, h('th', null, '編號'), h('th', null, '議題'), h('th', null, '報告頁碼'), h('th', null, '導讀人'), h('th', null, '狀態'), h('th', null, '討論'), h('th', null, '影響條文'))), tb))));
 };
 /* ---------- 導讀時間軸：每場導讀的重點條列（存在 meetings/{id}.keys） ----------
-   重點 { id, kind: dec 決議｜mem 要記住｜find 重要發現｜open 待釐清, text 一句話, detail 細節, issues [議題編號] } */
+   重點 { id, kind: dec 決議｜mem 要記住｜find 重要發現｜open 待釐清, text 一句話, detail 細節, issues [議題編號],
+          待釐清另有 done 已解決、doneAt 日期、doneNote 怎麼解決、doneBy } */
 const KP_KINDS = [['dec', '決議'], ['mem', '要記住'], ['find', '重要發現'], ['open', '待釐清']];
 const kpName = k => (KP_KINDS.find(x => x[0] === k) || [k, '重點'])[1];
 const kpMeets = () => S.meetings.filter(m => (m.keys || []).length || (m.type === 'reading' && (held(m) || (m.date && m.date <= today())))).sort((a, b) => ((a.date || '') < (b.date || '') ? 1 : -1));
 A.keyPoints = () => { const out = []; S.meetings.forEach(m => (m.keys || []).forEach((k, i) => { if (k && k.text) out.push({ m, k, i }); })); return out; };
 const kpSave = (m, keys) => A.patch('meetings', m.id, { keys });
+const kpPatch = (m, i, p) => { const cur = A.byId('meetings', m.id) || m; const keys = (cur.keys || []).map(x => Object.assign({}, x)); if (!keys[i]) return; Object.assign(keys[i], p); return kpSave(cur, keys); };
+// 待釐清：標為已解決（可寫怎麼解決）或改回未解決
+function kpResolve(m, i) {
+  const cur = A.byId('meetings', m.id) || m; const k = (cur.keys || [])[i]; if (!k || !S.canWrite) return;
+  if (k.done) { A.confirm('改回未解決？', k.text, '改回未解決', () => kpPatch(cur, i, { done: false, doneAt: '', doneNote: '', doneBy: null })); return; }
+  const box = h('div', { class: 'cf', role: 'dialog', 'aria-modal': 'true' });
+  const note = h('textarea', { class: 'in', id: 'kp-done-note', rows: 3, placeholder: '怎麼解決、在哪一場確認的，例如：11/6 第二次導讀確認改由手冊規定（可不填）' });
+  const ok = () => { box.remove(); kpPatch(cur, i, { done: true, doneAt: today(), doneNote: note.value.trim(), doneBy: S.myUid || null }); };
+  box.append(h('div', { class: 'cfb kp-ed' }, h('h3', null, '標為已解決'), h('p', null, k.text), A.field('解決說明', note, true),
+    h('div', { class: 'act' }, h('button', { class: 'btn', type: 'button', onclick: () => box.remove() }, '取消'), h('button', { class: 'btn solid', type: 'button', onclick: ok }, '標為已解決'))));
+  box.addEventListener('keydown', e => { if (e.key === 'Escape') box.remove(); });
+  document.body.append(box); setTimeout(() => note.focus(), 30);
+}
+A.kpResolve = kpResolve;
+const kpDoneNote = k => k.kind === 'open' && k.done ? h('small', { class: 'kp-dn' }, '已解決' + (k.doneAt ? '（' + A.md(k.doneAt) + '）' : '') + (k.doneNote ? '：' + k.doneNote : '')) : '';
 const kpCard = (m, k, i, opts) => {
+  opts = opts || {};
   const key = m.id + ':' + (k.id || i); const open = S.kpOpen === key;
   const body = h('div', { class: 'kp-x' }, k.detail ? h('p', null, k.detail) : h('p', { class: 'muted' }, '沒有補充細節。'),
     h('div', { class: 'kp-act' }, h('button', { class: 'btn sm', type: 'button', onclick: e => { e.stopPropagation(); A.openDrawer('meeting', m.id); } }, '看會議紀錄'),
       (k.issues || []).map(n => { const is = S.issues.find(x => Number(x.no) === Number(n)); return is ? h('button', { class: 'btn sm', type: 'button', onclick: e => { e.stopPropagation(); A.openDrawer('issue', is.id); } }, '議題 ' + n + ' 導讀內容') : ''; }),
-      S.canWrite && !(opts && opts.ro) ? h('button', { class: 'btn sm', type: 'button', onclick: e => { e.stopPropagation(); kpEdit(m, i); } }, '修改') : ''));
-  const meta = [(k.issues || []).length ? '議題 ' + k.issues.join('、') : '', opts && opts.date ? A.roc(m.date) : ''].filter(Boolean).join('．');
-  const el = h('div', { class: 'kpr k-' + (k.kind || 'find') + (open ? ' on' : ''), role: 'button', tabindex: 0, 'aria-expanded': String(open),
+      S.canWrite && k.kind === 'open' && !opts.ro ? h('button', { class: 'btn sm', type: 'button', onclick: e => { e.stopPropagation(); kpResolve(m, i); } }, k.done ? '改回未解決' : '標為已解決') : '',
+      S.canWrite && !opts.ro ? h('button', { class: 'btn sm', type: 'button', onclick: e => { e.stopPropagation(); kpEdit(m, i); } }, '修改') : ''));
+  const meta = [opts.date ? A.md(m.date) : '', (k.issues || []).length ? '議題 ' + k.issues.join('、') : ''].filter(Boolean).join('．');
+  const lead = opts.check ? h('button', { class: 'chk' + (k.done ? ' on' : ''), type: 'button', 'aria-label': k.done ? '改回未解決' : '標為已解決', title: k.done ? '改回未解決' : '標為已解決', onclick: e => { e.stopPropagation(); kpResolve(m, i); } }) : null;
+  const el = h('div', { class: 'kpr k-' + (k.kind || 'find') + (opts.noPill ? ' np' : '') + (lead ? ' ck' : '') + (k.kind === 'open' && k.done ? ' done' : '') + (open ? ' on' : ''), role: 'button', tabindex: 0, 'aria-expanded': String(open),
     onkeydown: e => { if (e.target === e.currentTarget && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); e.currentTarget.click(); } } },
-    h('div', { class: 'kpr-h' }, h('span', { class: 'kp-l' }, kpName(k.kind)), h('span', { class: 'kp-t' }, k.text), meta ? h('span', { class: 'kp-i' }, meta) : h('span')), open ? body : '');
+    h('div', { class: 'kpr-h' }, lead || '', opts.noPill ? '' : h('span', { class: 'kp-l' }, kpName(k.kind)), h('span', { class: 'kp-t' }, h('span', { class: 'kp-tt' }, k.text), kpDoneNote(k)), meta ? h('span', { class: 'kp-i' }, meta) : h('span')), open ? body : '');
   // 抽屜裡不整頁重畫，直接在這一行展開／收合
-  el.addEventListener('click', () => { if (opts && opts.inline) { const on = !el.classList.contains('on'); el.classList.toggle('on', on); el.setAttribute('aria-expanded', String(on)); const x = el.querySelector('.kp-x'); if (on && !x) el.append(body); else if (!on && x) x.remove(); return; }
+  el.addEventListener('click', () => { if (opts.inline) { const on = !el.classList.contains('on'); el.classList.toggle('on', on); el.setAttribute('aria-expanded', String(on)); const x = el.querySelector('.kp-x'); if (on && !x) el.append(body); else if (!on && x) x.remove(); return; }
     S.kpOpen = open ? '' : key; A.render(); });
   return el;
 };
@@ -669,7 +688,7 @@ function kpEdit(m, idx) {
   const seg = h('div', { class: 'seg' }); const drawSeg = () => seg.replaceChildren(...KP_KINDS.map(([v, t]) => h('button', { type: 'button', 'aria-pressed': String(kind === v), onclick: () => { kind = v; drawSeg(); } }, t))); drawSeg();
   const txt = h('input', { class: 'in', id: 'kp-text', placeholder: '一句話寫重點，例如：劃設圖資以國土計畫發布當年為準' }); txt.value = k.text || '';
   const cnt = h('small', { class: 'muted' }); const upc = () => { cnt.textContent = txt.value.length + ' 字' + (txt.value.length > 40 ? '．建議 40 字內，細節寫在下面' : ''); }; txt.addEventListener('input', upc); upc();
-  const det = h('textarea', { class: 'in', id: 'kp-detail', placeholder: '細節、出處、頁碼（點開卡片才會看到）', rows: 4 }); det.value = k.detail || '';
+  const det = h('textarea', { class: 'in', id: 'kp-detail', placeholder: '細節、出處、頁碼（點開那一行才會看到）', rows: 4 }); det.value = k.detail || '';
   const chips = h('div', { class: 'chips-in' }); const drawChips = () => { chips.replaceChildren(); for (let n = 1; n <= 24; n++) { const on = iss.includes(n); chips.append(h('button', { type: 'button', 'aria-pressed': String(on), onclick: () => { iss = on ? iss.filter(x => x !== n) : iss.concat(n).sort((a, b) => a - b); drawChips(); } }, n)); } }; drawChips();
   const save = () => { const t = txt.value.trim(); if (!t) { txt.focus(); return; }
     const rec = Object.assign({}, k, { kind, text: t, detail: det.value.trim(), issues: iss }); if (isNew) keys.push(rec); else keys[idx] = rec;
@@ -682,6 +701,20 @@ function kpEdit(m, idx) {
   document.body.append(box); setTimeout(() => txt.focus(), 30);
 }
 A.kpEdit = kpEdit;
+// 頁面最上方：所有導讀的待釐清，未解決在前，已解決可展開
+function openTracker(okI) {
+  const all = A.keyPoints().filter(x => x.k.kind === 'open' && okI(x));
+  if (!all.length) return null;
+  const byDate = (a, b) => ((a.m.date || '') < (b.m.date || '') ? 1 : (a.m.date || '') > (b.m.date || '') ? -1 : a.i - b.i);
+  const todo = all.filter(x => !x.k.done).sort(byDate), done = all.filter(x => x.k.done).sort((a, b) => ((a.k.doneAt || '') < (b.k.doneAt || '') ? 1 : -1));
+  const showDone = !!S.kpShowDone;
+  const head = h('div', { class: 'kp-tr-h' }, h('span', { class: 'kp-tr-n' }, String(todo.length)), h('span', null, '項尚未解決'), h('small', { class: 'muted' }, '共 ' + all.length + ' 項待釐清'));
+  return card(chead('待釐清追蹤', '各場導讀提出、還沒有答案的問題．解決了就打勾', head),
+    h('div', { class: 'pad' },
+      todo.length ? h('div', { class: 'kp-list' }, todo.map(x => kpCard(x.m, x.k, x.i, { noPill: true, check: true, date: true }))) : h('p', { class: 'muted', style: 'margin:0' }, '目前沒有未解決的待釐清。'),
+      done.length ? h('button', { class: 'kp-more', type: 'button', 'aria-expanded': String(showDone), onclick: () => { S.kpShowDone = !showDone; A.render(); } }, (showDone ? '收起' : '顯示') + '已解決 ' + done.length + ' 項') : '',
+      showDone && done.length ? h('div', { class: 'kp-list' }, done.map(x => kpCard(x.m, x.k, x.i, { noPill: true, check: true, date: true }))) : ''));
+}
 function keyTimeline(frag, seg) {
   const all = A.keyPoints(); const kf = S.kpKind || ''; const ifl = S.kpIssue || '';
   const okI = x => !ifl || (x.k.issues || []).map(Number).includes(Number(ifl));
@@ -696,16 +729,20 @@ function keyTimeline(frag, seg) {
   frag.append(h('div', { class: 'toolbar', style: 'margin-bottom:14px' }, seg, kseg, isel));
   const ms = kpMeets();
   if (!ms.length) { frag.append(card(h('div'), emptyBox('還沒有導讀紀錄', '導讀會議（類型選「議題導讀」）開完後，就會出現在這條時間軸上；每場可以整理幾條重點。'))); return; }
-  const line = h('div', { class: 'kp-line' }); let shown = 0; const order = KP_KINDS.map(x => x[0]);
+  if (!kf || kf === 'open') { const tr = openTracker(okI); if (tr) frag.append(tr); }
+  const line = h('div', { class: 'kp-line' }); let shown = 0;
   ms.forEach(m => {
     const ks = (m.keys || []).map((k, i) => ({ m, k, i })).filter(x => x.k && x.k.text && hit(x));
     if ((kf || ifl) && !ks.length) return; shown++;
-    ks.sort((a, b) => order.indexOf(a.k.kind) - order.indexOf(b.k.kind));
+    // 同一場依類型分組：類型標題只出現一次，底下列句子
+    const groups = KP_KINDS.map(([kd, nm]) => [kd, nm, ks.filter(x => (x.k.kind || 'find') === kd)]).filter(g => g[2].length);
     line.append(h('section', { class: 'kp-node' },
       h('div', { class: 'kp-date' }, h('b', null, A.md(m.date)), h('small', null, m.date ? (A.parse(m.date).getFullYear() - 1911) + ' 年．週' + A.wd(m.date) : '未定日期')),
       h('div', { class: 'kp-body' }, h('div', { class: 'kp-mh' }, h('button', { type: 'button', class: 'kp-title', onclick: () => A.openDrawer('meeting', m.id) }, m.title || '導讀會議'),
         S.canWrite ? h('button', { class: 'btn sm', type: 'button', onclick: () => kpEdit(m) }, '新增重點') : ''),
-        ks.length ? h('div', { class: 'kp-list' }, ks.map(x => kpCard(m, x.k, x.i))) : h('p', { class: 'muted', style: 'margin:6px 0 0' }, '這場還沒整理重點。'))));
+        groups.length ? groups.map(([kd, nm, xs]) => h('div', { class: 'kp-g' },
+          h('div', { class: 'kp-gh k-' + kd }, h('span', { class: 'kp-l' }, nm), h('span', { class: 'kp-gn' }, xs.length + ' 項' + (kd === 'open' && xs.some(x => x.k.done) ? '．已解決 ' + xs.filter(x => x.k.done).length : ''))),
+          h('div', { class: 'kp-list' }, xs.map(x => kpCard(m, x.k, x.i, { noPill: true }))))) : h('p', { class: 'muted', style: 'margin:6px 0 0' }, '這場還沒整理重點。'))));
   });
   if (!shown) line.append(h('p', { class: 'muted' }, '沒有符合篩選的重點。'));
   frag.append(card(chead('導讀時間軸', '新的在上面．點一行看細節與出處'), h('div', { class: 'pad' }, line)));

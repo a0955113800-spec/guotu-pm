@@ -777,6 +777,20 @@ textarea.in.lt-ta{min-height:300px;font-size:14px;line-height:1.75}
 .kp-i{font:500 13px var(--num);color:var(--muted);white-space:nowrap}
 .kp-t{font-size:16.5px;line-height:1.6;font-weight:500;color:var(--ink);text-wrap:pretty}
 .kpr .kp-x{margin:10px 0 2px 92px;padding-top:10px;border-top:1px dashed var(--hair-2);cursor:auto}
+.kpr.np .kpr-h{grid-template-columns:minmax(0,1fr) auto}
+.kpr.ck .kpr-h{grid-template-columns:22px minmax(0,1fr) auto}
+.kpr.ck .chk{align-self:start;margin-top:4px}
+.kp-tt{display:block}
+.kp-dn{display:block;margin-top:2px;font-size:13.5px;font-weight:400;color:var(--good-ink)}
+.kpr.done .kp-tt{text-decoration:line-through;text-decoration-color:var(--faint);color:var(--muted)}
+.kpr.np .kp-x{margin-left:0}.kpr.ck .kp-x{margin-left:36px}
+.kp-g{margin-bottom:16px}.kp-g:last-child{margin-bottom:0}
+.kp-gh{display:flex;align-items:center;gap:8px;margin:0 0 4px}
+.kp-gn{font:500 12.5px var(--num);color:var(--muted)}
+.kp-tr-h{display:flex;align-items:baseline;gap:6px;white-space:nowrap}
+.kp-tr-n{font:600 28px/1 var(--num);color:var(--bad)}
+.kp-more{all:unset;cursor:pointer;display:inline-block;margin-top:10px;font-size:13.5px;color:var(--ink-2)}
+.kp-more:hover{text-decoration:underline;text-underline-offset:3px}
 .kp-x p{margin:0 0 12px;font-size:15px;line-height:1.75;color:var(--ink-2);white-space:pre-line;text-align:justify}
 .kp-act{display:flex;gap:6px;flex-wrap:wrap}
 .kp-n{font-family:var(--num);opacity:.65}
@@ -790,6 +804,10 @@ textarea.in.lt-ta{min-height:300px;font-size:14px;line-height:1.75}
   .kpr-h{grid-template-columns:auto minmax(0,1fr);gap:4px 10px}
   .kpr-h .kp-t{grid-column:1/-1;grid-row:2}
   .kpr .kp-x{margin-left:0}
+  .kpr.ck .kpr-h{grid-template-columns:22px minmax(0,1fr)}
+  .kpr.ck .kpr-h .kp-t{grid-column:2;grid-row:1}
+  .kpr.ck .kpr-h .kp-i{grid-column:2;grid-row:2}
+  .kp-tr-h small{display:none}
 }
 </style>
 
@@ -825,7 +843,7 @@ textarea.in.lt-ta{min-height:300px;font-size:14px;line-height:1.75}
 <script src="fb-shim.js?v=ef45d065"></script>
 <script src="tw.js?v=dcfaac43"></script>
 <script src="app-core.js?v=07af568d"></script>
-<script src="app-pages.js?v=d60af3b7"></script>
+<script src="app-pages.js?v=c870447b"></script>
 
 </body>
 </html>
