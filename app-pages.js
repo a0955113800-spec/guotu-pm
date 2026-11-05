@@ -637,8 +637,8 @@ A.pages.issues = function (frag) {
   });
   frag.append(card(chead('24 項重要議題', '點一列看導讀內容與歷次討論'), h('div', { class: 'tbl mc', style: 'margin-top:10px' }, h('table', null, h('thead', null, h('tr', null, h('th', null, '編號'), h('th', null, '議題'), h('th', null, '報告頁碼'), h('th', null, '導讀人'), h('th', null, '狀態'), h('th', null, '討論'), h('th', null, '影響條文'))), tb))));
 };
-/* ---------- 導讀時間軸：每場導讀的重點卡（存在 meetings/{id}.keys） ----------
-   重點卡 { id, kind: dec 決議｜mem 要記住｜find 重要發現｜open 待釐清, text 一句話, detail 細節, issues [議題編號] } */
+/* ---------- 導讀時間軸：每場導讀的重點條列（存在 meetings/{id}.keys） ----------
+   重點 { id, kind: dec 決議｜mem 要記住｜find 重要發現｜open 待釐清, text 一句話, detail 細節, issues [議題編號] } */
 const KP_KINDS = [['dec', '決議'], ['mem', '要記住'], ['find', '重要發現'], ['open', '待釐清']];
 const kpName = k => (KP_KINDS.find(x => x[0] === k) || [k, '重點'])[1];
 const kpMeets = () => S.meetings.filter(m => (m.keys || []).length || (m.type === 'reading' && (held(m) || (m.date && m.date <= today())))).sort((a, b) => ((a.date || '') < (b.date || '') ? 1 : -1));
@@ -650,11 +650,11 @@ const kpCard = (m, k, i, opts) => {
     h('div', { class: 'kp-act' }, h('button', { class: 'btn sm', type: 'button', onclick: e => { e.stopPropagation(); A.openDrawer('meeting', m.id); } }, '看會議紀錄'),
       (k.issues || []).map(n => { const is = S.issues.find(x => Number(x.no) === Number(n)); return is ? h('button', { class: 'btn sm', type: 'button', onclick: e => { e.stopPropagation(); A.openDrawer('issue', is.id); } }, '議題 ' + n + ' 導讀內容') : ''; }),
       S.canWrite && !(opts && opts.ro) ? h('button', { class: 'btn sm', type: 'button', onclick: e => { e.stopPropagation(); kpEdit(m, i); } }, '修改') : ''));
-  const el = h('div', { class: 'kp k-' + (k.kind || 'find') + (open ? ' on' : ''), role: 'button', tabindex: 0, 'aria-expanded': String(open),
+  const meta = [(k.issues || []).length ? '議題 ' + k.issues.join('、') : '', opts && opts.date ? A.roc(m.date) : ''].filter(Boolean).join('．');
+  const el = h('div', { class: 'kpr k-' + (k.kind || 'find') + (open ? ' on' : ''), role: 'button', tabindex: 0, 'aria-expanded': String(open),
     onkeydown: e => { if (e.target === e.currentTarget && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); e.currentTarget.click(); } } },
-    h('div', { class: 'kp-h' }, h('span', { class: 'kp-l' }, kpName(k.kind)), (k.issues || []).length ? h('span', { class: 'kp-i' }, '議題 ' + k.issues.join('、')) : '', opts && opts.date ? h('span', { class: 'kp-d' }, A.roc(m.date)) : ''),
-    h('div', { class: 'kp-t' }, k.text), open ? body : '');
-  // 抽屜裡不整頁重畫，直接在卡片上展開／收合
+    h('div', { class: 'kpr-h' }, h('span', { class: 'kp-l' }, kpName(k.kind)), h('span', { class: 'kp-t' }, k.text), meta ? h('span', { class: 'kp-i' }, meta) : h('span')), open ? body : '');
+  // 抽屜裡不整頁重畫，直接在這一行展開／收合
   el.addEventListener('click', () => { if (opts && opts.inline) { const on = !el.classList.contains('on'); el.classList.toggle('on', on); el.setAttribute('aria-expanded', String(on)); const x = el.querySelector('.kp-x'); if (on && !x) el.append(body); else if (!on && x) x.remove(); return; }
     S.kpOpen = open ? '' : key; A.render(); });
   return el;
@@ -674,8 +674,8 @@ function kpEdit(m, idx) {
   const save = () => { const t = txt.value.trim(); if (!t) { txt.focus(); return; }
     const rec = Object.assign({}, k, { kind, text: t, detail: det.value.trim(), issues: iss }); if (isNew) keys.push(rec); else keys[idx] = rec;
     box.remove(); kpSave(cur, keys); };
-  const del = !isNew ? h('button', { class: 'btn danger', type: 'button', style: 'margin-right:auto', onclick: () => A.confirm('刪除這張重點卡？', k.text, '刪除', () => { box.remove(); keys.splice(idx, 1); kpSave(cur, keys); }, true) }, '刪除') : '';
-  box.append(h('div', { class: 'cfb kp-ed' }, h('h3', null, isNew ? '新增重點卡' : '修改重點卡'), h('small', { class: 'muted' }, cur.title || '會議'),
+  const del = !isNew ? h('button', { class: 'btn danger', type: 'button', style: 'margin-right:auto', onclick: () => A.confirm('刪除這條重點？', k.text, '刪除', () => { box.remove(); keys.splice(idx, 1); kpSave(cur, keys); }, true) }, '刪除') : '';
+  box.append(h('div', { class: 'cfb kp-ed' }, h('h3', null, isNew ? '新增重點' : '修改重點'), h('small', { class: 'muted' }, cur.title || '會議'),
     A.field('類型', seg, true), A.field('重點', h('div', null, txt, cnt), true), A.field('細節', det, true), A.field('相關議題', chips, true),
     h('div', { class: 'act' }, del, h('button', { class: 'btn', type: 'button', onclick: () => box.remove() }, '取消'), h('button', { class: 'btn solid', type: 'button', onclick: save }, '儲存'))));
   box.addEventListener('keydown', e => { if (e.key === 'Escape') box.remove(); });
@@ -695,7 +695,7 @@ function keyTimeline(frag, seg) {
   isel.value = String(ifl);
   frag.append(h('div', { class: 'toolbar', style: 'margin-bottom:14px' }, seg, kseg, isel));
   const ms = kpMeets();
-  if (!ms.length) { frag.append(card(h('div'), emptyBox('還沒有導讀紀錄', '導讀會議（類型選「議題導讀」）開完後，就會出現在這條時間軸上；每場可以整理幾張重點卡。'))); return; }
+  if (!ms.length) { frag.append(card(h('div'), emptyBox('還沒有導讀紀錄', '導讀會議（類型選「議題導讀」）開完後，就會出現在這條時間軸上；每場可以整理幾條重點。'))); return; }
   const line = h('div', { class: 'kp-line' }); let shown = 0; const order = KP_KINDS.map(x => x[0]);
   ms.forEach(m => {
     const ks = (m.keys || []).map((k, i) => ({ m, k, i })).filter(x => x.k && x.k.text && hit(x));
@@ -704,17 +704,17 @@ function keyTimeline(frag, seg) {
     line.append(h('section', { class: 'kp-node' },
       h('div', { class: 'kp-date' }, h('b', null, A.md(m.date)), h('small', null, m.date ? (A.parse(m.date).getFullYear() - 1911) + ' 年．週' + A.wd(m.date) : '未定日期')),
       h('div', { class: 'kp-body' }, h('div', { class: 'kp-mh' }, h('button', { type: 'button', class: 'kp-title', onclick: () => A.openDrawer('meeting', m.id) }, m.title || '導讀會議'),
-        S.canWrite ? h('button', { class: 'btn sm', type: 'button', onclick: () => kpEdit(m) }, '新增重點卡') : ''),
-        ks.length ? h('div', { class: 'kp-grid' }, ks.map(x => kpCard(m, x.k, x.i))) : h('p', { class: 'muted', style: 'margin:6px 0 0' }, '這場還沒整理重點卡。'))));
+        S.canWrite ? h('button', { class: 'btn sm', type: 'button', onclick: () => kpEdit(m) }, '新增重點') : ''),
+        ks.length ? h('div', { class: 'kp-list' }, ks.map(x => kpCard(m, x.k, x.i))) : h('p', { class: 'muted', style: 'margin:6px 0 0' }, '這場還沒整理重點。'))));
   });
-  if (!shown) line.append(h('p', { class: 'muted' }, '沒有符合篩選的重點卡。'));
-  frag.append(card(chead('導讀時間軸', '新的在上面．點卡片看細節與出處'), h('div', { class: 'pad' }, line)));
+  if (!shown) line.append(h('p', { class: 'muted' }, '沒有符合篩選的重點。'));
+  frag.append(card(chead('導讀時間軸', '新的在上面．點一行看細節與出處'), h('div', { class: 'pad' }, line)));
 }
-// 議題抽屜用：這個議題歷次導讀的重點卡
+// 議題抽屜用：這個議題歷次導讀的重點
 A.issueKeyCards = function (no) {
   const ks = A.keyPoints().filter(x => (x.k.issues || []).map(Number).includes(Number(no))).sort((a, b) => ((a.m.date || '') < (b.m.date || '') ? 1 : -1));
   if (!ks.length) return null;
-  return h('div', { class: 'kp-grid one' }, ks.map(x => kpCard(x.m, x.k, x.i, { date: true, ro: true, inline: true })));
+  return h('div', { class: 'kp-list' }, ks.map(x => kpCard(x.m, x.k, x.i, { date: true, ro: true, inline: true })));
 };
 // 成大議題案（總結報告第二章）24 項議題的正式名稱；資料庫裡還沒填名稱的會自動補上
 const ISSUE_NAMES = { 1: '國土計畫制度下之使用地類別編定用途', 2: '農業發展地區之土地使用及變更影響', 3: '原住民族土地使用及居住問題', 4: '既有合法土地使用權益保障情形', 5: '土地使用違規查處及檢舉獎勵制度', 6: '國土計畫法罰則執行原則', 7: '國土計畫法申請土地使用方式及與區域計畫法制度之銜接', 8: '海洋資源地區土地使用制度', 9: '確認後續全國國土計畫之國土永續發展目標', 10: '強化全國國土計畫對於直轄市、縣（市）國土計畫之銜接及指導性', 11: '城鄉發展及成長管理計畫之調整方式', 12: '宜維護農地管理策略', 13: '未來發展地區指認原則調整方式', 14: '強化國土功能分區劃設條件、土地使用指導事項與計畫引導間之關聯性及操作方式（含離島地區）', 15: '補充國土功能分區圖公告後，國土保育地區及其分類之檢討調整條件', 16: '補充國土功能分區圖公告後，農業發展地區及其分類之檢討調整條件', 17: '補充國土功能分區圖公告後，城鄉發展地區及其分類之檢討調整條件（含依原獎勵投資條例或原山坡地開發建築管理辦法同意（或許可）案件回歸按目的事業法令管制及其國土功能分區分類檢討調整）', 18: '補充漲價歸公之土地開發衡平機制', 19: '強化目的事業主管機關推動國土復育促進地區策略', 20: '強化各級國土計畫對外溝通及共識形成之機制', 21: '強化全國國土計畫對於鄉村地區計畫之銜接及指導性', 22: '強化部門空間發展策略對土地使用之指導方式', 23: '配合專法調整氣候變遷減緩及調適策略', 24: '處理跨域議題（含都會地區與特定地區）' };
@@ -1043,9 +1043,9 @@ A.drawers.meeting = function (id) {
         h('button', { class: 'btn sm', type: 'button', onclick: () => A.progressPpt(A.byId('meetings', id) || m) }, '下載進度簡報（PPT）'), h('button', { class: 'btn sm', type: 'button', onclick: () => A.lineMeetingModal(A.byId('meetings', id) || m) }, 'LINE 通知文字'))),
     h('div', { class: 'sec' }, h('h4', null, '會議紀錄版本', h('small', null, '每次修正都上傳一版，系統會比對改了哪裡')), minutesBox(m)),
     h('div', { class: 'sec' }, h('h4', null, '紀錄重點', h('small', null, '摘要、決議與檔案')), A.inp(mi.summary, v => upMin({ summary: v }), { multi: true, ph: '重點摘要：討論了什麼、結論是什麼', id: 'm-sum' })),
-    m.type === 'reading' || (m.keys || []).length ? h('div', { class: 'sec' }, h('h4', null, '導讀重點卡', h('small', null, (m.keys || []).length + ' 張．顯示在議題頁的導讀時間軸')),
+    m.type === 'reading' || (m.keys || []).length ? h('div', { class: 'sec' }, h('h4', null, '導讀重點', h('small', null, (m.keys || []).length + ' 條．顯示在議題頁的導讀時間軸')),
       h('div', { style: 'display:flex;gap:8px;flex-wrap:wrap' }, h('button', { class: 'btn sm', type: 'button', onclick: () => { S.issView = 'tl'; try { localStorage.setItem('gt-iv', 'tl'); } catch (_) {} A.closeDrawer(); A.go('issues'); } }, '到導讀時間軸'),
-        S.canWrite ? h('button', { class: 'btn sm', type: 'button', onclick: () => kpEdit(A.byId('meetings', id) || m) }, '新增重點卡') : '')) : '',
+        S.canWrite ? h('button', { class: 'btn sm', type: 'button', onclick: () => kpEdit(A.byId('meetings', id) || m) }, '新增重點') : '')) : '',
     h('div', { class: 'sec' }, h('h4', null, '決議事項', h('small', null, '可指定負責人與期限，逾期會出現在提醒')), dbox, decAct),
     h('div', { class: 'sec' }, h('h4', null, '檔案', h('small', null, '原始檔請放公司伺服器')), files, S.canWrite ? (A.assets ? drop : h('p', { class: 'cap', style: 'margin:0' }, '原始檔請存在公司伺服器，把路徑貼在下面；紀錄全文請用上方「會議紀錄版本」上傳，系統會記下每版的修改。')) : '', pick,
       S.canWrite ? h('div', { style: 'display:flex;gap:8px' }, pathIn, h('button', { class: 'btn sm', type: 'button', onclick: () => { const v = pathIn.value.trim(); if (v) upMin({ paths: (mi.paths || []).concat(v) }); } }, '加入路徑')) : '', paths),
@@ -1067,7 +1067,7 @@ A.drawers.issue = function (id) {
         A.field('報告頁碼', h('span', { class: 'muted num' }, i.pages ? '印刷頁 ' + i.pages[0] + '–' + i.pages[1] + '（' + n + ' 頁）' : '未設定')),
         A.field('狀態', A.sel(i.status || '未開始', ISTATUS, v => up({ status: v }), { id: 'i-st' })), A.field('摘要期限', A.inp(i.summaryDue, v => up({ summaryDue: v }), { type: 'date', id: 'i-due' })),
         A.field('處理方式', A.sel(i.handling || '', [['', '待定'], '修正全國國土計畫', '修正其他相關規定', '不修'], v => up({ handling: v }), { id: 'i-hand' })), A.field('對應章節', A.inp(i.chapter, v => up({ chapter: v }), { id: 'i-chap', ph: '例如：第八章' })))),
-    (c => c ? h('div', { class: 'sec' }, h('h4', null, '導讀重點', h('small', null, '歷次導讀整理的重點卡．點卡片看細節')), c) : '')(A.issueKeyCards(i.no)),
+    (c => c ? h('div', { class: 'sec' }, h('h4', null, '導讀重點', h('small', null, '歷次導讀整理的重點．點一行看細節')), c) : '')(A.issueKeyCards(i.no)),
     h('div', { class: 'sec' }, h('h4', null, '導讀內容', h('small', null, '照報告每個議題的四段，加上實務對照與待釐清')), note('bg', '背景'), note('content', '主要內容'), note('qa', '外界問答'), note('next', '後續研議'), note('practice', '實務對照'), note('open', '待釐清')),
     h('div', { class: 'sec' }, h('h4', null, '歷次討論', h('small', null, dis.length + ' 場會議')), hist),
     A.planIssueCount(i.no) ? h('div', { class: 'sec' }, h('h4', null, '影響草案條文', h('small', null, A.planIssueCount(i.no) + ' 處')), h('div', null, h('button', { class: 'btn sm', type: 'button', onclick: () => { A.closeDrawer(); A.planGoIssue(i.no); } }, '到草案修訂只看這個議題', ic(I_ARROW)))) : '',
