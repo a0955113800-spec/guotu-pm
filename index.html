@@ -361,6 +361,10 @@ tr:last-child td{border-bottom:0}
 .file small{color:var(--muted);margin-left:auto;white-space:nowrap}
 .note-edit{font-size:12px;color:var(--muted)}
 .peerbar{display:flex;align-items:center;gap:8px;padding:8px 22px;background:var(--blue-soft);color:var(--blue-ink);font-size:12.5px}
+.dwf{display:flex;align-items:center;gap:8px;padding:12px 22px calc(12px + env(safe-area-inset-bottom,0px));border-top:1px solid var(--hair);background:var(--panel)}
+.dwf .dwf-hint{flex:1;min-width:0;font-size:12.5px}
+.btn.solid{background:var(--ink);color:var(--panel);box-shadow:none}
+.btn.solid:hover{background:var(--ink-2)}
 /* 對話框與通知 */
 .cf{position:fixed;inset:0;z-index:60;background:rgba(20,18,12,.35);display:grid;place-items:center;padding:16px}
 .cfb{width:min(420px,100%);background:var(--panel);border-radius:24px;padding:22px;box-shadow:var(--float);display:flex;flex-direction:column;gap:12px}
@@ -781,8 +785,8 @@ textarea.in.lt-ta{min-height:300px;font-size:14px;line-height:1.75}
 <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-storage-compat.js"></script>
 <script src="fb-shim.js?v=ef45d065"></script>
 <script src="tw.js?v=dcfaac43"></script>
-<script src="app-core.js?v=ae76715b"></script>
-<script src="app-pages.js?v=e27ad57b"></script>
+<script src="app-core.js?v=6f480edd"></script>
+<script src="app-pages.js?v=7de9b124"></script>
 
 </body>
 </html>

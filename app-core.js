@@ -184,7 +184,7 @@ A.renderShell = function () {
   A.$('#addBtn').addEventListener('click', A.openAdd);
   document.addEventListener('keydown', e => {
     if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') { e.preventDefault(); A.openSearch(); }
-    if (e.key === 'Escape') { const t = document.querySelector('.cf,.sr,.ov'); if (t) { t.remove(); if (t.classList.contains('ov')) A.closeDrawer(); } }
+    if (e.key === 'Escape') { const t = document.querySelector('.cf') || document.querySelector('.sr,.ov'); if (t) { if (t.classList.contains('ov')) A.closeDrawer(); else t.remove(); } }
   });
   A.$('#meSel').addEventListener('change', e => { A.setMe(e.target.value); A.render(); });
 };
@@ -236,14 +236,19 @@ document.addEventListener('focusout', () => { setTimeout(() => { if (A.pendingRe
 
 /* ---------- 抽屜、對話框、提示 ---------- */
 A.openDrawer = function (kind, id) {
+  if (S.drawer && typeof S.drawer.guard === 'function' && !(S.drawer.kind === kind && S.drawer.id === id) && S.drawer.guard(() => A.openDrawer(kind, id))) return;
   S.drawer = { kind, id }; A.presence({ rec: kind + ':' + id });
   document.querySelectorAll('.ov').forEach(x => x.remove());
-  const ov = h('div', { class: 'ov', onclick: e => { if (e.target === ov) { ov.remove(); A.closeDrawer(); } } });
+  const ov = h('div', { class: 'ov', onclick: e => { if (e.target === ov) A.closeDrawer(); } });
   const dw = h('div', { class: 'dw', role: 'dialog', 'aria-modal': 'true' });
   ov.append(dw); document.body.append(ov);
   A.fillDrawer(dw);
 };
-A.closeDrawer = function () { S.drawer = null; A.presence({ rec: null }); document.querySelectorAll('.ov').forEach(x => x.remove()); A.schedule(); };
+/* 關閉抽屜：抽屜若登記了 guard（例如工項抽屜有未儲存的草稿），先問過再關；force 為真則直接關 */
+A.closeDrawer = function (force) {
+  if (!force && S.drawer && typeof S.drawer.guard === 'function' && S.drawer.guard()) return;
+  S.drawer = null; A.presence({ rec: null }); document.querySelectorAll('.ov').forEach(x => x.remove()); A.schedule();
+};
 A.refreshDrawer = function () {
   const dw = document.querySelector('.ov .dw'); if (!dw || !S.drawer) return;
   if (dw.contains(document.activeElement) && /INPUT|TEXTAREA|SELECT/.test(document.activeElement.tagName)) return;
@@ -253,17 +258,17 @@ A.refreshDrawer = function () {
 A.fillDrawer = function (dw) {
   const d = S.drawer; const fn = A.drawers && A.drawers[d.kind]; if (!fn) return;
   const close = h('button', { class: 'ib', type: 'button', 'aria-label': '關閉', onclick: () => A.closeDrawer() }, A.icon('<path d="M6 6l12 12M18 6L6 18"/>'));
-  const out = fn(d.id); if (!out) { A.closeDrawer(); return; }
+  const out = fn(d.id); if (!out) { A.closeDrawer(true); return; }
   const head = h('div', { class: 'dwh' }, h('h3', null, out.title), out.actions || null, close);
   const eds = A.editorsOf(d.kind + ':' + d.id);
   const peer = eds.length ? h('div', { class: 'peerbar' }, '共編中：另有 ' + eds.length + ' 位成員正在看這一筆，存檔以最後一次為準。') : null;
-  dw.replaceChildren(head, peer || '', h('div', { class: 'dwb' }, out.body));
+  dw.replaceChildren(head, peer || '', h('div', { class: 'dwb' }, out.body), out.foot || '');
 };
-A.confirm = function (title, msg, yes, onYes, danger) {
+A.confirm = function (title, msg, yes, onYes, danger, no) {
   const box = h('div', { class: 'cf', role: 'alertdialog', 'aria-modal': 'true' });
   const close = () => box.remove();
   box.append(h('div', { class: 'cfb' }, h('h3', null, title), msg ? h('p', null, msg) : '',
-    h('div', { class: 'act' }, h('button', { class: 'btn', type: 'button', onclick: close }, '取消'),
+    h('div', { class: 'act' }, h('button', { class: 'btn', type: 'button', onclick: close }, no || '取消'),
       h('button', { class: 'btn' + (danger ? ' danger' : ''), type: 'button', onclick: () => { close(); onYes(); } }, yes || '確定'))));
   document.body.append(box); box.querySelector('.act .btn:last-child').focus();
 };

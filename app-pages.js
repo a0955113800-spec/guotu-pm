@@ -855,28 +855,52 @@ A.pages.admin = function (frag) {
 /* ---------- 抽屜內容 ---------- */
 A.drawers = {};
 const logLine = r => { const by = r.updatedBy ? A.profName(r.updatedBy) : ''; if (r.updatedBy) A.profiles([r.updatedBy]); return r.updatedAt ? h('div', { class: 'note-edit' }, '最後更新：' + (by ? by + '．' : '') + new Date(r.updatedAt).toLocaleString('zh-TW', { hour12: false })) : ''; };
-const delBtn = (coll, id, what) => S.canWrite ? h('button', { class: 'btn sm danger', type: 'button', onclick: () => A.confirm('刪除這個' + what + '？', '刪除後無法復原。', '刪除', async () => { await A.del(coll, id); A.closeDrawer(); }, true) }, '刪除') : '';
+const delBtn = (coll, id, what) => S.canWrite ? h('button', { class: 'btn sm danger', type: 'button', onclick: () => A.confirm('刪除這個' + what + '？', '刪除後無法復原。', '刪除', async () => { await A.del(coll, id); A.closeDrawer(true); }, true) }, '刪除') : '';
 function ownersPicker(sel, onChange) {
   const box = h('div', { class: 'chips-in', style: 'gap:6px' });
   S.people.forEach(p => { const on = sel.includes(p.id); box.append(h('button', { type: 'button', 'aria-pressed': String(on), style: 'width:auto;padding:0 10px', disabled: !S.canWrite, onclick: () => onChange(on ? sel.filter(x => x !== p.id) : sel.concat(p.id)) }, p.name)); });
   if (!S.people.length) box.append(h('span', { class: 'muted' }, '先到後台新增成員'));
   return box;
 }
+/* 工項抽屜：草稿模式。改動先放在 S.drawer.draft，按「完成編輯」才一次寫入；「取消編輯」整份丟掉。
+   日期欄位用鍵盤打到一半（值暫時無效）不會再寫進資料庫，共編的人也不會看到半成品。 */
 A.drawers.task = function (id) {
-  const t = A.byId('tasks', id); if (!t) return null;
-  const up = d => A.patch('tasks', id, d);
+  const t0 = A.byId('tasks', id); if (!t0) return null;
+  const dr = S.drawer; if (!dr.draft || dr.draftId !== id) { dr.draft = {}; dr.draftId = id; }
+  const cur = () => Object.assign({}, A.byId('tasks', id) || t0, dr.draft);
+  const t = cur();
+  const same = (a, b) => JSON.stringify(a == null ? '' : a) === JSON.stringify(b == null ? '' : b);
+  const changed = () => { const base = A.byId('tasks', id) || t0; return Object.keys(dr.draft).filter(k => !same(dr.draft[k], base[k])); };
+  const hint = () => { const el = document.querySelector('.ov .dwf .dwf-hint'); if (el) el.textContent = changed().length ? '有尚未儲存的修改' : ''; };
+  // full 為真才整個抽屜重繪（按鈕類操作）；文字、日期、下拉這類在輸入中的欄位只局部更新，避免打字被打斷
+  const up = (d, full) => {
+    Object.assign(dr.draft, d); hint();
+    if (full) { A.refreshDrawer(); return; }
+    if (d.title !== undefined) { const hh = document.querySelector('.ov .dwh h3'); if (hh) hh.textContent = d.title || '工項'; }
+    if ('start' in d || 'due' in d || 'status' in d) { const old = document.querySelector('.ov .dwb .sec.deps'); if (old) old.replaceWith(depEditor(cur(), up)); }
+  };
+  const finish = async () => {
+    const ks = changed(); if (!ks.length) { A.closeDrawer(true); return; }
+    const now = cur(); if (now.start && now.due && now.start > now.due) { A.toast('開始日晚於期限，請先修正日期。'); return; }
+    const patch = {}; ks.forEach(k => { patch[k] = dr.draft[k]; });
+    if (await A.patch('tasks', id, patch)) { dr.draft = {}; A.closeDrawer(true); }
+  };
+  const cancel = () => { dr.draft = {}; A.closeDrawer(true); };
+  dr.guard = next => { if (!changed().length) return false; A.confirm('有尚未儲存的修改', '要放棄這些修改嗎？', '放棄修改', () => { dr.draft = {}; next ? next() : A.closeDrawer(true); }, true, '繼續編輯'); return true; };
   const src = t.source && t.source.meeting ? A.byId('meetings', t.source.meeting) : null;
   return { title: t.title || '工項', actions: delBtn('tasks', id, '工項'), body: [
     A.field('工項名稱', A.inp(t.title, v => up({ title: v }), { id: 't-title' })),
     h('div', { class: 'fgrid' }, A.field('分類', A.sel(t.cat || '其他', CATS, v => up({ cat: v }), { id: 't-cat' })), A.field('狀態', A.sel(t.status || '未開始', STATUS, v => up({ status: v }), { id: 't-st' })),
       A.field('開始', A.inp(t.start, v => up({ start: v }), { type: 'date', id: 't-start' })), A.field('期限', A.inp(t.due, v => up({ due: v }), { type: 'date', id: 't-due' }))),
-    A.field('負責人', ownersPicker(t.owners || [], v => up({ owners: v })), true),
-    depEditor(t),
+    A.field('負責人', ownersPicker(t.owners || [], v => up({ owners: v }, true)), true),
+    depEditor(t, up),
     A.field('屬於會議', A.sel(t.meeting || '', [['', '（不屬於特定會議）'], ...S.meetings.slice().sort((a, b) => ((a.date || '9') < (b.date || '9') ? -1 : 1)).map(x => [x.id, (x.date ? A.md(x.date) + ' ' : '') + (x.title || '會議')])], v => up({ meeting: v }), { id: 't-meeting' })),
-    A.field('關鍵工項', h('label', { style: 'display:flex;gap:8px;align-items:center' }, h('button', { class: 'chk' + (t.crit ? ' on' : ''), type: 'button', 'aria-label': '關鍵工項', onclick: () => S.canWrite && up({ crit: !t.crit }) }), h('span', { class: 'muted' }, '標記後在清單上會特別標出'))),
+    A.field('關鍵工項', h('label', { style: 'display:flex;gap:8px;align-items:center' }, h('button', { class: 'chk' + (t.crit ? ' on' : ''), type: 'button', 'aria-label': '關鍵工項', onclick: () => S.canWrite && up({ crit: !t.crit }, true) }), h('span', { class: 'muted' }, '標記後在清單上會特別標出'))),
     A.field('備註', A.inp(t.note, v => up({ note: v }), { multi: true, id: 't-note' }), true),
     src ? A.field('來源', h('button', { class: 'btn sm', type: 'button', onclick: () => A.openDrawer('meeting', src.id) }, '會議決議：' + (src.title || ''))) : '',
-    logLine(t)] };
+    logLine(t)],
+    foot: S.canWrite ? h('div', { class: 'dwf' }, h('span', { class: 'muted dwf-hint' }, changed().length ? '有尚未儲存的修改' : ''),
+      h('button', { class: 'btn sm', type: 'button', onclick: cancel }, '取消編輯'), h('button', { class: 'btn sm solid', type: 'button', onclick: finish }, '完成編輯')) : null };
 };
 A.drawers.meeting = function (id) {
   const m = A.byId('meetings', id); if (!m) return null;
@@ -1064,15 +1088,15 @@ A.depRisk = function (t, seen) {
   return [...new Set(out)];
 };
 A.depConflict = t => { const s = t.start || t.due; return s ? (t.deps || []).map(d => A.byId('tasks', d)).filter(p => p && p.status !== '完成' && p.due && p.due >= s).map(p => p.title) : []; };
-function depEditor(t) {
+function depEditor(t, up) {
   const deps = (t.deps || []).map(d => A.byId('tasks', d)).filter(Boolean), td = today();
   const succ = S.tasks.filter(u => (u.deps || []).includes(t.id));
   const desc = new Set(); const walk = id => S.tasks.forEach(u => { if ((u.deps || []).includes(id) && !desc.has(u.id)) { desc.add(u.id); walk(u.id); } }); walk(t.id);
-  const set = v => A.patch('tasks', t.id, { deps: v });
+  const set = v => up ? up({ deps: v }, true) : A.patch('tasks', t.id, { deps: v });
   const li = (d, rm) => h('div', { class: 'dep' + (d.status === '完成' ? ' done' : d.due && d.due < td ? ' late' : '') },
     h('button', { type: 'button', class: 'dep-t', onclick: () => A.openDrawer('task', d.id) }, d.title || '工項'), h('small', null, d.due ? A.md(d.due) : ''), stTag(d.status || '未開始'),
     rm && S.canWrite ? h('button', { type: 'button', class: 'dep-x', 'aria-label': '移除前置工項', onclick: () => set((t.deps || []).filter(x => x !== d.id)) }, '×') : '');
-  const box = h('div', { class: 'sec' }, h('h4', null, '前置工項', h('small', null, deps.length ? '要等這些完成．' + deps.filter(d => d.status === '完成').length + '/' + deps.length + ' 已完成' : '要等哪些工項完成才能開始')));
+  const box = h('div', { class: 'sec deps' }, h('h4', null, '前置工項', h('small', null, deps.length ? '要等這些完成．' + deps.filter(d => d.status === '完成').length + '/' + deps.length + ' 已完成' : '要等哪些工項完成才能開始')));
   deps.forEach(d => box.append(li(d, true)));
   if (t.status !== '完成') { const rk = A.depRisk(t), cf = A.depConflict(t);
     if (rk.length) box.append(h('div', { class: 'rk bad', style: 'margin-top:6px' }, ic(I_ALERT), '前置延誤：' + rk.join('、')));
