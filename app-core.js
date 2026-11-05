@@ -35,6 +35,8 @@ const WD = ['日', '一', '二', '三', '四', '五', '六'];
 A.wd = s => WD[A.parse(s).getDay()];
 A.md = s => { if (!s) return '未定'; const d = A.parse(s); return (d.getMonth() + 1) + '/' + d.getDate(); };
 A.mdw = s => s ? A.md(s) + '（' + A.wd(s) + '）' : '未定';
+/* 日期後面接時間（有填才接），例如 11/9 14:30 */
+A.mdt = (s, tm) => A.md(s) + (s && tm ? ' ' + tm : '');
 A.roc = s => { if (!s) return ''; const d = A.parse(s); return (d.getFullYear() - 1911) + '.' + pad(d.getMonth() + 1) + '.' + pad(d.getDate()); };
 A.holidaySet = () => { const m = {}; ((A.S.calendar && A.S.calendar.holidays) || []).forEach(x => { if (x && x.date) m[x.date] = x.name || '假日'; }); return m; };
 A.isOff = (s, H) => { const d = A.parse(s).getDay(); return d === 0 || d === 6 || !!(H || A.holidaySet())[s]; };

@@ -320,7 +320,7 @@ function listView(ts) {
         h('td', { class: 'mm1' }, h('span', { class: t.status === '完成' ? 'done-t' : null }, t.title), t.crit ? h('span', { class: 'tag t-bad', style: 'margin-left:8px' }, '關鍵') : '', t.status !== '完成' && A.depRisk(t).length ? h('span', { class: 'tag t-warn', style: 'margin-left:8px', title: '前置延誤：' + A.depRisk(t).join('、') }, '前置延誤') : '', editDot('task:' + t.id),
           (t.deps || []).length ? h('small', { class: 'deps' }, '前置：' + t.deps.map(d => (A.byId('tasks', d) || {}).title).filter(Boolean).join('、')) : ''),
         h('td', null, h('div', { style: 'display:flex;gap:4px' }, (t.owners || []).map(o => A.avatar(o, 26)))),
-        h('td', { class: 'num', style: 'white-space:nowrap' }, (t.start ? A.md(t.start) + ' – ' : '') + A.md(t.due)),
+        h('td', { class: 'num', style: 'white-space:nowrap' }, (t.start ? A.mdt(t.start, t.startTime) + ' – ' : '') + A.mdt(t.due, t.dueTime)),
         h('td', null, stTag(t.status)), h('td', { style: 'white-space:nowrap' }, late ? h('span', { class: 'tag t-bad' }, lateTxt(t.due)) : '')));
     });
   });
@@ -337,7 +337,7 @@ function boardView() {
     col.append(h('h3', null, s, h('small', null, items.length)));
     items.forEach(t => {
       const c = h('button', { class: 'kc', type: 'button', 'data-id': t.id }, h('b', null, t.title, editDot('task:' + t.id)),
-        h('div', { class: 'meta2' }, (t.owners || []).map(o => A.avatar(o, 22)), t.due ? h('span', { class: t.due < today() && s !== '完成' ? 'tag t-bad' : 'tag' }, A.md(t.due)) : '', h('span', null, t.cat || '')));
+        h('div', { class: 'meta2' }, (t.owners || []).map(o => A.avatar(o, 22)), t.due ? h('span', { class: t.due < today() && s !== '完成' ? 'tag t-bad' : 'tag' }, A.mdt(t.due, t.dueTime)) : '', h('span', null, t.cat || '')));
       c.addEventListener('click', () => { if (c.dataset.dragged) { delete c.dataset.dragged; return; } A.openDrawer('task', t.id); });
       if (S.canWrite) kbDrag(c, t);
       col.append(c);
@@ -451,7 +451,7 @@ function ganttView(ts) {
     const tr = track(), s = t.start || t.due, e = t.due || t.start, a = s <= e ? s : e, b = s <= e ? e : s;
     const os = (t.owners || []).map(A.pname).filter(Boolean), st = t.status || '未開始';
     const bl = x(a) + 1, bw = Math.max(x(b) - x(a) + DW - 2, 6);
-    const ext = t.ext || /^署方[：:]/.test(String(t.title || '')); const bar = h('div', { class: 'gx-bar st-' + st + (st === '完成' ? ' done' : '') + (late(t) ? ' late' : '') + (t.crit ? ' crit' : '') + (ext ? ' ext' : ''), style: 'left:' + bl + 'px;width:' + bw + 'px', title: t.title + '\n' + (os.join('、') || '未指派') + '｜' + st + '\n' + (t.start ? A.md(t.start) : '—') + ' → ' + (t.due ? A.md(t.due) : '—') + (t.crit ? '\n關鍵工項' : '') });
+    const ext = t.ext || /^署方[：:]/.test(String(t.title || '')); const bar = h('div', { class: 'gx-bar st-' + st + (st === '完成' ? ' done' : '') + (late(t) ? ' late' : '') + (t.crit ? ' crit' : '') + (ext ? ' ext' : ''), style: 'left:' + bl + 'px;width:' + bw + 'px', title: t.title + '\n' + (os.join('、') || '未指派') + '｜' + st + '\n' + (t.start ? A.mdt(t.start, t.startTime) : '—') + ' → ' + (t.due ? A.mdt(t.due, t.dueTime) : '—') + (t.crit ? '\n關鍵工項' : '') });
     if (st === '完成' && bw >= 18) bar.append(h('span', { class: 'gx-ok' }, '✓'));
     tr.append(bar);
     const tx = h('span', { class: 'gx-tx' + (late(t) ? ' late' : '') }, h('b', null, t.due ? A.md(t.due) : ''), S.gOwn ? (os.length ? os.join('、') : h('em', null, '未指派')) : '');
@@ -495,7 +495,7 @@ function gxHead() {
 document.addEventListener('scroll', () => { requestAnimationFrame(gxHead); }, { passive: true, capture: true });
 let gxRz = 0; window.addEventListener('resize', () => { clearTimeout(gxRz); gxRz = setTimeout(() => { if (S.page === 'schedule' && S.schedView === 'gantt') A.render(); }, 200); });
 function exportTasks() {
-  A.exportCSV('國土通檢_工項', [['分類', '工項', '負責人', '開始', '期限', '狀態', '關鍵', '備註'], ...S.tasks.map(t => [t.cat || '', t.title, (t.owners || []).map(A.pname).join('、'), A.roc(t.start), A.roc(t.due), t.status || '', t.crit ? '是' : '', t.note || ''])]);
+  A.exportCSV('國土通檢_工項', [['分類', '工項', '負責人', '開始', '期限', '狀態', '關鍵', '備註'], ...S.tasks.map(t => [t.cat || '', t.title, (t.owners || []).map(A.pname).join('、'), A.roc(t.start) + (t.start && t.startTime ? ' ' + t.startTime : ''), A.roc(t.due) + (t.due && t.dueTime ? ' ' + t.dueTime : ''), t.status || '', t.crit ? '是' : '', t.note || ''])]);
 }
 A.newTask = async function (preset) {
   const id = A.newId(); const me = A.meId();
@@ -881,7 +881,7 @@ A.drawers.task = function (id) {
   };
   const finish = async () => {
     const ks = changed(); if (!ks.length) { A.closeDrawer(true); return; }
-    const now = cur(); if (now.start && now.due && now.start > now.due) { A.toast('開始日晚於期限，請先修正日期。'); return; }
+    const now = cur(); if (now.start && now.due && now.start + ' ' + (now.startTime || '00:00') > now.due + ' ' + (now.dueTime || '23:59')) { A.toast(now.start > now.due ? '開始日晚於期限，請先修正日期。' : '開始時間晚於期限時間，請先修正。'); return; }
     const patch = {}; ks.forEach(k => { patch[k] = dr.draft[k]; });
     if (await A.patch('tasks', id, patch)) { dr.draft = {}; A.closeDrawer(true); }
   };
@@ -890,8 +890,9 @@ A.drawers.task = function (id) {
   const src = t.source && t.source.meeting ? A.byId('meetings', t.source.meeting) : null;
   return { title: t.title || '工項', actions: delBtn('tasks', id, '工項'), body: [
     A.field('工項名稱', A.inp(t.title, v => up({ title: v }), { id: 't-title' })),
-    h('div', { class: 'fgrid' }, A.field('分類', A.sel(t.cat || '其他', CATS, v => up({ cat: v }), { id: 't-cat' })), A.field('狀態', A.sel(t.status || '未開始', STATUS, v => up({ status: v }), { id: 't-st' })),
-      A.field('開始', A.inp(t.start, v => up({ start: v }), { type: 'date', id: 't-start' })), A.field('期限', A.inp(t.due, v => up({ due: v }), { type: 'date', id: 't-due' }))),
+    h('div', { class: 'fgrid' }, A.field('分類', A.sel(t.cat || '其他', CATS, v => up({ cat: v }), { id: 't-cat' })), A.field('狀態', A.sel(t.status || '未開始', STATUS, v => up({ status: v }), { id: 't-st' }))),
+    A.field('開始', h('div', { class: 'dtm' }, A.inp(t.start, v => up({ start: v }), { type: 'date', id: 't-start' }), A.inp(t.startTime, v => up({ startTime: v }), { type: 'time', id: 't-start-tm' }), h('small', { class: 'muted' }, '時間可不填'))),
+    A.field('期限', h('div', { class: 'dtm' }, A.inp(t.due, v => up({ due: v }), { type: 'date', id: 't-due' }), A.inp(t.dueTime, v => up({ dueTime: v }), { type: 'time', id: 't-due-tm' }), h('small', { class: 'muted' }, '時間可不填'))),
     A.field('負責人', ownersPicker(t.owners || [], v => up({ owners: v }, true)), true),
     depEditor(t, up),
     A.field('屬於會議', A.sel(t.meeting || '', [['', '（不屬於特定會議）'], ...S.meetings.slice().sort((a, b) => ((a.date || '9') < (b.date || '9') ? -1 : 1)).map(x => [x.id, (x.date ? A.md(x.date) + ' ' : '') + (x.title || '會議')])], v => up({ meeting: v }), { id: 't-meeting' })),
