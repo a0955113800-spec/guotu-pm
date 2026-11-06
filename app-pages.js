@@ -190,6 +190,9 @@ function meetingMatrix() {
 }
 // 導讀只針對成大議題案的 24 個議題，依「議題數」分：份額整份 1、半份 0.5，題數用最大餘數法
 const DONE_ST = ['摘要完成', '已導讀'];
+const isCK = i => { const n = Number(i.no); return n >= 1 && n <= 24; };
+const ckI = () => S.issues.filter(isCK);
+A.ckIssues = ckI;
 A.readTargets = function (readers, total) {
   const units = readers.reduce((a, p) => a + Number(p.share), 0), out = {}; if (!units) return out;
   const raw = readers.map(p => { const q = total * Number(p.share) / units; return { id: p.id, n: Math.floor(q), f: q - Math.floor(q) }; });
@@ -198,8 +201,8 @@ A.readTargets = function (readers, total) {
   raw.forEach(r => { out[r.id] = r.n; }); return out;
 };
 A.allocation = function () {
-  const readers = S.people.filter(p => Number(p.share) > 0), tg = A.readTargets(readers, S.issues.length);
-  return readers.map(p => { const iss = S.issues.filter(i => i.reader === p.id).sort((a, b) => a.no - b.no); return { p, iss, n: iss.length, done: iss.filter(i => DONE_ST.includes(i.status)).length, target: tg[p.id] || 0 }; });
+  const readers = S.people.filter(p => Number(p.share) > 0), tg = A.readTargets(readers, ckI().length);
+  return readers.map(p => { const iss = ckI().filter(i => i.reader === p.id).sort((a, b) => a.no - b.no); return { p, iss, n: iss.length, done: iss.filter(i => DONE_ST.includes(i.status)).length, target: tg[p.id] || 0 }; });
 };
 const pagesOf = i => (i.pages && i.pages[1] && i.pages[0]) ? (i.pages[1] - i.pages[0] + 1) : 0;
 function readingStrip() {
@@ -267,9 +270,9 @@ A.pages.overview = function (frag) {
     card(chead('會議場次', null, h('span', { class: 'big' }, A.heldCount(), h('small', null, ' / ' + A.quotaTotal()))), meetingMatrix())));
 
   // 議題導讀＋最近會議紀錄
-  const totI = S.issues.length, doneI = S.issues.filter(i => DONE_ST.includes(i.status)).length;
+  const totI = ckI().length, doneI = ckI().filter(i => DONE_ST.includes(i.status)).length;
   const sess = S.meetings.filter(m => m.date && m.date >= td && /導讀|組內/.test(((A.typeOf(m.type) || {}).name || '') + (m.title || ''))).sort((a, b) => (a.date < b.date ? -1 : 1))[0];
-  const due = S.issues.filter(i => i.summaryDue && !['摘要完成', '已導讀'].includes(i.status)).sort((a, b) => (a.summaryDue < b.summaryDue ? -1 : 1));
+  const due = ckI().filter(i => i.summaryDue && !['摘要完成', '已導讀'].includes(i.status)).sort((a, b) => (a.summaryDue < b.summaryDue ? -1 : 1));
   const c4 = h('div', { class: 'cards4' });
   c4.append(h('button', { type: 'button', onclick: () => sess ? A.openDrawer('meeting', sess.id) : A.go('meetings') }, h('span', { class: 'k2' }, '下一場導讀'), h('b', null, sess ? A.mdw(sess.date) + ' ' + (sess.title || '') : '尚未排定'), h('small', null, sess && (sess.issues || []).length ? '議題 ' + sess.issues.join('、') : '')));
   due.slice(0, 3).forEach(i => { const lt = i.summaryDue < td; c4.append(h('button', { type: 'button', onclick: () => A.openDrawer('issue', i.id) }, h('span', { class: 'k2' }, lt ? '逾期' : '摘要待交'), h('b', { class: lt ? 'r' : null }, '議題 ' + i.no), h('small', null, (A.pname(i.reader) || '未指派') + '．' + (lt ? lateTxt(i.summaryDue) : A.md(i.summaryDue))))); });
@@ -614,17 +617,17 @@ A.pages.issues = function (frag) {
   if (S.issView === 'tl') { keyTimeline(frag, iseg); return; }
   frag.append(h('div', { class: 'toolbar', style: 'margin-bottom:14px' }, iseg));
   if (!S.issues.length) { frag.append(card(h('div'), emptyBox('議題清單還沒建立', '請管理者建立 24 項議題與報告頁碼，之後即可分配導讀。'))); return; }
-  const al = A.allocation(), units = al.reduce((a, x) => a + Number(x.p.share), 0), per = units ? S.issues.length / units : 0, un = S.issues.filter(i => !i.reader).length;
+  const al = A.allocation(), units = al.reduce((a, x) => a + Number(x.p.share), 0), per = units ? ckI().length / units : 0, un = ckI().filter(i => !i.reader).length;
   const legend = h('div', { class: 'tg', style: 'margin-top:14px' }, al.map(x => h('span', { class: x.n !== x.target ? 'off' : null }, x.p.name + '：' + x.n + ' 題（目標 ' + x.target + '）')), un ? h('span', { class: 'off' }, '未分配 ' + un + ' 題') : '');
   if (!S.allocView) { try { S.allocView = localStorage.getItem('gt-av') || ''; } catch (_) {} S.allocView = S.allocView || (S.canWrite ? 'board' : 'strip'); }
   const av = S.allocView;
   const avSeg = h('div', { class: 'seg' }, [['board', '手動分配'], ['strip', '分配總覽']].map(([k, t]) => h('button', { type: 'button', 'aria-pressed': String(av === k), onclick: () => { S.allocView = k; try { localStorage.setItem('gt-av', k); } catch (_) {} A.render(); } }, t)));
-  const sub = '共 ' + S.issues.length + ' 題，每份約 ' + per.toFixed(1) + ' 題' + (al.some(x => Number(x.p.share) < 1) ? '，半份約 ' + (per / 2).toFixed(1) + ' 題' : '');
+  const sub = '共 ' + ckI().length + ' 題，每份約 ' + per.toFixed(1) + ' 題' + (al.some(x => Number(x.p.share) < 1) ? '，半份約 ' + (per / 2).toFixed(1) + ' 題' : '');
   frag.append(card(chead('導讀分配', sub + (av === 'board' ? '．把議題卡拖到成員欄就完成分配' : '．每格＝1 題，顏色＝進度'), avSeg),
     h('div', { class: 'pad' }, av === 'board' ? allocBoard() : readingStrip(), legend,
       !al.length ? h('p', { class: 'cap' }, '到後台「成員」設定每個人的導讀份額（整份 1、半份 0.5），再按「依議題數自動分配」。') : '')));
   const tb = h('tbody'); const td = today();
-  [...S.issues].sort((a, b) => a.no - b.no).forEach(i => {
+  [...ckI()].sort((a, b) => a.no - b.no).forEach(i => {
     const dis = S.meetings.filter(m => (m.issues || []).map(Number).includes(Number(i.no)));
     tb.append(h('tr', { class: 'click', onclick: () => A.openDrawer('issue', i.id) }, h('td', { class: 'num', style: 'width:52px;font-weight:600' }, i.no),
       h('td', { class: 'mm1' }, i.name || h('span', { class: 'muted' }, '（未填名稱）'), editDot('issue:' + i.id), h('div', { class: 'muted', style: 'font-size:12px' }, i.group || '')),
@@ -636,6 +639,21 @@ A.pages.issues = function (frag) {
       (n => h('td', { style: 'white-space:nowrap', onclick: e => e.stopPropagation() }, n ? h('button', { type: 'button', class: 'tag t-teal pl-lk', title: '到「草案修訂」只看這個議題影響的條文', onclick: () => A.planGoIssue(i.no) }, '影響條文 ' + n + ' 處') : h('span', { class: 'muted' }, '—')))(A.planIssueCount(i.no))));
   });
   frag.append(card(chead('24 項重要議題', '點一列看導讀內容與歷次討論'), h('div', { class: 'tbl mc', style: 'margin-top:10px' }, h('table', null, h('thead', null, h('tr', null, h('th', null, '編號'), h('th', null, '議題'), h('th', null, '報告頁碼'), h('th', null, '導讀人'), h('th', null, '狀態'), h('th', null, '討論'), h('th', null, '影響條文'))), tb))));
+
+  // 署方建議的議題（不屬於成大議題案、不分配導讀）
+  const ext = S.issues.filter(i => !isCK(i)).sort((a, b) => a.no - b.no);
+  if (ext.length) {
+    const eb = h('tbody');
+    ext.forEach(i => {
+      const dis = S.meetings.filter(m => (m.issues || []).map(Number).includes(Number(i.no)));
+      eb.append(h('tr', { class: 'click', onclick: () => A.openDrawer('issue', i.id) }, h('td', { class: 'num', style: 'width:52px;font-weight:600' }, i.no),
+        h('td', { class: 'mm1' }, i.name || h('span', { class: 'muted' }, '（未填名稱）'), editDot('issue:' + i.id), h('div', { class: 'muted', style: 'font-size:12px' }, i.group || '')),
+        h('td', { class: 'muted', style: 'white-space:nowrap' }, i.chapter || '—'),
+        h('td', null, stTag(i.status || '未開始')),
+        h('td', { class: 'muted', style: 'white-space:nowrap' }, dis.length ? '討論 ' + dis.length + ' 次' : '')));
+    });
+    frag.append(card(chead('署方建議議題', '國土署提出、待確認的議題．不列入導讀分配．點一列看內容'), h('div', { class: 'tbl mc', style: 'margin-top:10px' }, h('table', null, h('thead', null, h('tr', null, h('th', null, '編號'), h('th', null, '議題'), h('th', null, '對應章節'), h('th', null, '狀態'), h('th', null, '討論'))), eb))));
+  }
 };
 /* ---------- 導讀時間軸：每場導讀的重點條列（存在 meetings/{id}.keys） ----------
    重點 { id, kind: dec 決議｜mem 要記住｜find 重要發現｜open 待釐清, text 一句話, detail 細節, issues [議題編號],
@@ -762,7 +780,7 @@ A.fillIssueNames = async function () {
 // 依議題數分配：同一工作小組的議題盡量給同一人；「其餘個別議題」拿來補足題數
 function planReading(readers, tg) {
   const FILL = '其餘個別議題', gm = {};
-  [...S.issues].sort((a, b) => a.no - b.no).forEach(i => { const g = i.group || FILL; (gm[g] = gm[g] || []).push(i); });
+  [...ckI()].sort((a, b) => a.no - b.no).forEach(i => { const g = i.group || FILL; (gm[g] = gm[g] || []).push(i); });
   const queue = Object.keys(gm).filter(g => g !== FILL).sort((a, b) => gm[a][0].no - gm[b][0].no).map(g => gm[g]);
   const filler = gm[FILL] || [], plan = {}, maxT = Math.max(1, ...readers.map(p => tg[p.id] || 0));
   readers.forEach(p => {
@@ -780,13 +798,13 @@ A.planReading = planReading;
 
 // 手動分配看板：每位導讀人一欄（另列「未分配」），把議題卡拖到誰的欄就分給誰；手機請用表格的下拉選
 function allocBoard() {
-  const readers = S.people.filter(p => Number(p.share) > 0), tg = A.readTargets(readers, S.issues.length);
-  const extra = S.people.filter(p => !(Number(p.share) > 0) && S.issues.some(i => i.reader === p.id));
+  const readers = S.people.filter(p => Number(p.share) > 0), tg = A.readTargets(readers, ckI().length);
+  const extra = S.people.filter(p => !(Number(p.share) > 0) && ckI().some(i => i.reader === p.id));
   const cols = readers.concat(extra).map(p => ({ id: p.id, p, name: p.name, target: tg[p.id] })).concat([{ id: '', name: '未分配' }]);
   const known = new Set(S.people.map(p => p.id));
   const board = h('div', { class: 'ab' });
   cols.forEach(c => {
-    const items = S.issues.filter(i => c.id ? i.reader === c.id : !i.reader || !known.has(i.reader)).sort((a, b) => a.no - b.no);
+    const items = ckI().filter(i => c.id ? i.reader === c.id : !i.reader || !known.has(i.reader)).sort((a, b) => a.no - b.no);
     const off = c.target != null && items.length !== c.target;
     const col = h('div', { class: 'ab-col' + (c.id ? '' : ' none'), 'data-rid': c.id },
       h('div', { class: 'ab-h' }, c.p ? A.avatar(c.p.id, 24) : h('span', { class: 'ab-ph' }, '？'), h('b', null, c.name), h('small', { class: off ? 'off' : null }, items.length + (c.target != null ? ' / ' + c.target : '') + ' 題')));
@@ -836,13 +854,13 @@ function pDrag(card, colSel, onDrop) {
 }
 function autoAllocate() {
   // 依每個人目前負責的最小議題編號排順序，重新分配時盡量不洗牌
-  const curMin = p => Math.min(999, ...S.issues.filter(i => i.reader === p.id).map(i => Number(i.no)));
+  const curMin = p => Math.min(999, ...ckI().filter(i => i.reader === p.id).map(i => Number(i.no)));
   const readers = S.people.filter(p => Number(p.share) > 0).map((p, k) => [p, k]).sort((x, y) => curMin(x[0]) - curMin(y[0]) || x[1] - y[1]).map(x => x[0]);
   if (!readers.length) { A.toast('請先到後台設定成員的導讀份額。'); return; }
-  const tg = A.readTargets(readers, S.issues.length);
-  A.confirm('依議題數自動分配？', '把 ' + S.issues.length + ' 個議題分給：' + readers.map(p => p.name + ' ' + tg[p.id] + ' 題').join('、') + '。同一工作小組的議題盡量給同一人；已經分配的會重新安排，之後可在議題裡個別調整。', '重新分配', async () => {
+  const tg = A.readTargets(readers, ckI().length);
+  A.confirm('依議題數自動分配？', '把 ' + ckI().length + ' 個議題分給：' + readers.map(p => p.name + ' ' + tg[p.id] + ' 題').join('、') + '。同一工作小組的議題盡量給同一人；已經分配的會重新安排，之後可在議題裡個別調整。', '重新分配', async () => {
     const plan = planReading(readers, tg);
-    for (const i of S.issues) if ((i.reader || '') !== (plan[i.id] || '')) await A.patch('issues', i.id, { reader: plan[i.id] || '' });
+    for (const i of ckI()) if ((i.reader || '') !== (plan[i.id] || '')) await A.patch('issues', i.id, { reader: plan[i.id] || '' });
     A.toast('已依議題數重新分配導讀人。');
   });
 }
@@ -1525,7 +1543,7 @@ A.progressData = function (m) {
   const next = S.tasks.filter(t => t.status !== '完成' && ((t.start && t.start > to && t.start <= until) || (t.due && t.due > to && t.due <= until))).sort(byDue);
   const decs = pm ? ((pm.minutes || {}).decisions || []).filter(d => d.text) : [];
   const issues = (m.issues || []).map(n => S.issues.find(i => Number(i.no) === Number(n))).filter(Boolean);
-  const rd = { total: S.issues.length, done: S.issues.filter(i => DONE_ST.includes(i.status)).length, reading: S.issues.filter(i => i.status === '閱讀中').length };
+  const rd = { total: ckI().length, done: ckI().filter(i => DONE_ST.includes(i.status)).length, reading: ckI().filter(i => i.status === '閱讀中').length };
   const dl = S.project.startDate ? A.deliverables().map(d => ({ n: d.name, d: A.delivDue(d) })).filter(x => x.d >= to)[0] : null;
   return { pm, nm, from, to, until, done, doing, late, next, decs, issues, rd, dl };
 };
