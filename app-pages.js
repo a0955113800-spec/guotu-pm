@@ -609,12 +609,14 @@ A.newMeeting = async function (preset) {
 /* ---------- 議題 ---------- */
 A.pages.issues = function (frag) {
   if (S.issView == null) { try { S.issView = localStorage.getItem('gt-iv') || 'list'; } catch (_) { S.issView = 'list'; } }
+  if (!['agency', 'list', 'tl'].includes(S.issView)) S.issView = 'list';
   frag.append(h('div', { class: 'page-h' }, h('div', null, h('h1', null, '議題'), h('p', null, '國土議題案 24 項重要議題的導讀分工、進度與歷次討論。')),
-    h('div', { class: 'act' }, S.canWrite && S.issues.length && S.issView !== 'tl' ? h('button', { class: 'btn', type: 'button', onclick: autoAllocate }, '依議題數自動分配') : '')));
+    h('div', { class: 'act' }, S.canWrite && S.issView === 'agency' ? h('button', { class: 'btn', type: 'button', onclick: agNew }, '新增署方議題') : S.canWrite && S.issues.length && S.issView === 'list' ? h('button', { class: 'btn', type: 'button', onclick: autoAllocate }, '依議題數自動分配') : '')));
   if (!readyGate(frag)) return;
   const nKp = A.keyPoints().length;
-  const iseg = h('div', { class: 'seg', role: 'group', 'aria-label': '檢視方式' }, [['list', '分工與進度'], ['tl', '導讀時間軸' + (nKp ? ' ' + nKp : '')]].map(([k, t]) => h('button', { type: 'button', 'aria-pressed': String((S.issView || 'list') === k), onclick: () => { S.issView = k; try { localStorage.setItem('gt-iv', k); } catch (_) {} A.render(); } }, t)));
+  const iseg = h('div', { class: 'seg', role: 'group', 'aria-label': '檢視方式' }, [['agency', '署方議題' + (agIssues().length ? ' ' + agIssues().length : '')], ['list', '分工與進度'], ['tl', '導讀時間軸' + (nKp ? ' ' + nKp : '')]].map(([k, t]) => h('button', { type: 'button', 'aria-pressed': String((S.issView || 'list') === k), onclick: () => { S.issView = k; try { localStorage.setItem('gt-iv', k); } catch (_) {} A.render(); } }, t)));
   if (S.issView === 'tl') { keyTimeline(frag, iseg); return; }
+  if (S.issView === 'agency') { frag.append(h('div', { class: 'toolbar', style: 'margin-bottom:6px' }, iseg), h('p', { class: 'cap', style: 'margin:0 0 14px' }, '國土署提出、待確認的議題，不列入成大議題案的導讀分配；每一題記下我們和國土署的來來回回。')); agencyBody(frag); return; }
   frag.append(h('div', { class: 'toolbar', style: 'margin-bottom:14px' }, iseg));
   if (!S.issues.length) { frag.append(card(h('div'), emptyBox('議題清單還沒建立', '請管理者建立 24 項議題與報告頁碼，之後即可分配導讀。'))); return; }
   const al = A.allocation(), units = al.reduce((a, x) => a + Number(x.p.share), 0), per = units ? ckI().length / units : 0, un = ckI().filter(i => !i.reader).length;
@@ -640,7 +642,6 @@ A.pages.issues = function (frag) {
   });
   frag.append(card(chead('24 項重要議題', '點一列看導讀內容與歷次討論'), h('div', { class: 'tbl mc', style: 'margin-top:10px' }, h('table', null, h('thead', null, h('tr', null, h('th', null, '編號'), h('th', null, '議題'), h('th', null, '報告頁碼'), h('th', null, '導讀人'), h('th', null, '狀態'), h('th', null, '討論'), h('th', null, '影響條文'))), tb))));
 
-  if (agIssues().length) frag.append(h('p', { class: 'cap', style: 'margin:4px 0 0' }, '國土署提出的議題（' + agIssues().length + ' 題）另列在「署方議題」頁，不列入導讀分配。', h('button', { class: 'kp-more', type: 'button', style: 'margin:0 0 0 8px', onclick: () => A.go('agency') }, '前往署方議題')));
 };
 /* ---------- 導讀時間軸：每場導讀的重點條列（存在 meetings/{id}.keys） ----------
    重點 { id, kind: dec 決議｜mem 要記住｜find 重要發現｜open 待釐清, text 一句話, detail 細節, issues [議題編號],
@@ -811,10 +812,7 @@ function agTalkList(i, opts) {
 A.agTalkList = agTalkList;
 const agStateSel = i => S.canWrite ? A.sel((i.ag || {}).state || 'wait', AG_STATES.map(x => [x[0], x[1]]), v => A.patch('issues', i.id, { ag: Object.assign({}, i.ag || {}, { state: v }) }), { sm: true, id: 'ag-st-' + i.id })
   : h('span', { class: 'tag ' + agState(i)[2] }, agState(i)[1]);
-A.pages.agency = function (frag) {
-  frag.append(h('div', { class: 'page-h' }, h('div', null, h('h1', null, '署方議題'), h('p', null, '國土署提出、待確認的議題，不列入成大議題案的導讀分配；每一題記下我們和國土署的來來回回。')),
-    h('div', { class: 'act' }, S.canWrite ? h('button', { class: 'btn', type: 'button', onclick: agNew }, '新增署方議題') : '')));
-  if (!readyGate(frag)) return;
+function agencyBody(frag) {
   const xs = agIssues();
   if (!xs.length) { frag.append(card(h('div'), emptyBox('還沒有署方議題', '國土署提出新的議題時，按右上角「新增署方議題」記下來。'))); return; }
   const cnt = k => xs.filter(i => ((i.ag || {}).state || 'wait') === k).length;
@@ -831,6 +829,7 @@ A.pages.agency = function (frag) {
           S.canWrite ? h('button', { class: 'btn sm', type: 'button', style: 'margin-top:10px', onclick: () => agTalkEdit(i) }, '新增往來紀錄') : ''))));
   });
 };
+A.goAgency = () => { S.issView = 'agency'; try { localStorage.setItem('gt-iv', 'agency'); } catch (_) {} A.go('issues'); };
 function agNew() {
   const next = Math.max(100, ...S.issues.map(i => Number(i.no) || 0)) + 1;
   A.prompt('新增署方議題', '議題名稱', async v => { const id = A.newId(); if (await A.put('issues', id, { no: next, name: v, group: '署方待確認', chapter: '', status: '未開始', reader: '', notes: {}, ag: { state: 'wait', stance: '' }, talks: [], createdAt: new Date().toISOString() })) A.openDrawer('issue', id); });
