@@ -172,6 +172,7 @@ A.PAGES = [
   ['schedule', '時程', '<path d="M4 7h9M4 12h16M4 17h6"/><circle cx="16.5" cy="7" r="2"/><circle cx="13.5" cy="17" r="2"/>'],
   ['meetings', '會議', '<rect x="3.5" y="5" width="17" height="15.5" rx="3"/><path d="M3.5 10h17M8 3v4M16 3v4"/>'],
   ['issues', '議題', '<path d="M12 3l8 4.5-8 4.5-8-4.5z"/><path d="M4 12l8 4.5 8-4.5M4 16.5L12 21l8-4.5"/>'],
+  ['agency', '署方議題', '<path d="M4 5.5h11v8H8.5L4 17z"/><path d="M15 9.5h5v8.5l-3.5-2.5H11v-2.5"/>'],
   ['plan', '草案修訂', '<path d="M8 3.5h7l3.5 3.5v10H8z"/><path d="M5.5 7v13.5h10"/><path d="M15 3.5V7h3.5M11 12.5h4.5M11 15h3"/>'],
   ['events', '大事紀', '<path d="M5 21V3.5"/><path d="M5 4h12l-2.5 4L17 12H5"/>'],
   ['docs', '文件', '<path d="M6 3.5h8l4 4V20.5H6z"/><path d="M14 3.5v4h4M9 12h6M9 16h4"/>'],
@@ -193,7 +194,7 @@ A.renderShell = function () {
 A.renderNav = function () {
   const nav = A.$('#nav'); nav.replaceChildren();
   const late = A.overdue ? A.overdue().length : 0;
-  const counts = { schedule: S.tasks.length || '', meetings: A.heldCount ? A.heldCount() + '/' + A.quotaTotal() : '', issues: S.issues.length || '', plan: (S.plan_updates || []).length || '', events: (S.events || []).length || '', docs: '', contract: A.dutyStats ? (x => x.total ? x.done + '/' + x.total : '')(A.dutyStats()) : '' };
+  const counts = { schedule: S.tasks.length || '', meetings: A.heldCount ? A.heldCount() + '/' + A.quotaTotal() : '', issues: (A.ckIssues ? A.ckIssues().length : S.issues.length) || '', agency: A.agIssues ? (A.agIssues().length || '') : '', plan: (S.plan_updates || []).length || '', events: (S.events || []).length || '', docs: '', contract: A.dutyStats ? (x => x.total ? x.done + '/' + x.total : '')(A.dutyStats()) : '' };
   A.PAGES.forEach(([k, label, d]) => {
     const b = h('button', { type: 'button', 'aria-current': S.page === k ? 'page' : null, onclick: () => A.go(k) }, A.icon(d), label);
     if (k === 'overview' && late) b.append(h('span', { class: 'ct r' }, late));
@@ -318,7 +319,7 @@ A.openSearch = function () {
     const hit = (t) => t && String(t).toLowerCase().includes(q);
     const res = [];
     S.meetings.forEach(m => { const mi = m.minutes || {}; const dec = (mi.decisions || []).map(x => x.text).join(' '); if (hit(m.title) || hit(mi.summary) || hit(dec) || hit(m.place)) res.push(['會議', m.title || '未命名會議', (mi.summary || dec || '').slice(0, 80), () => A.openDrawer('meeting', m.id)]); });
-    S.issues.forEach(i => { const nt = Object.values(i.notes || {}).join(' '); if (hit(i.name) || hit(nt) || hit('議題 ' + i.no)) res.push(['議題', '議題 ' + i.no + (i.name ? '　' + i.name : ''), nt.slice(0, 80), () => A.openDrawer('issue', i.id)]); });
+    S.issues.forEach(i => { const nt = Object.values(i.notes || {}).join(' ') + ' ' + ((i.ag || {}).stance || '') + ' ' + (i.talks || []).map(t => t.text || '').join(' '); if (hit(i.name) || hit(nt) || hit('議題 ' + i.no)) res.push(['議題', '議題 ' + i.no + (i.name ? '　' + i.name : ''), nt.slice(0, 80), () => A.openDrawer('issue', i.id)]); });
     S.tasks.forEach(t => { if (hit(t.title) || hit(t.note)) res.push(['工項', t.title, t.note || '', () => A.openDrawer('task', t.id)]); });
     S.letters.forEach(l => { if (hit(l.subject) || hit(l.no)) res.push(['公文', l.subject || l.no, (l.kind || '') + ' ' + (l.no || ''), () => A.openDrawer('letter', l.id)]); });
     const snip = s => { const k = s.toLowerCase().indexOf(q); return (k > 24 ? '…' : '') + s.slice(Math.max(0, k - 24), k + 48) + (k + 48 < s.length ? '…' : ''); };

@@ -640,21 +640,7 @@ A.pages.issues = function (frag) {
   });
   frag.append(card(chead('24 項重要議題', '點一列看導讀內容與歷次討論'), h('div', { class: 'tbl mc', style: 'margin-top:10px' }, h('table', null, h('thead', null, h('tr', null, h('th', null, '編號'), h('th', null, '議題'), h('th', null, '報告頁碼'), h('th', null, '導讀人'), h('th', null, '狀態'), h('th', null, '討論'), h('th', null, '影響條文'))), tb))));
 
-  // 署方建議的議題（不屬於成大議題案、不分配導讀）
-  const ext = S.issues.filter(i => !isCK(i)).sort((a, b) => a.no - b.no);
-  if (ext.length) {
-    const eb = h('tbody');
-    ext.forEach(i => {
-      const dis = S.meetings.filter(m => (m.issues || []).map(Number).includes(Number(i.no)));
-      eb.append(h('tr', { class: 'click', onclick: () => A.openDrawer('issue', i.id) }, h('td', { class: 'num', style: 'width:52px;font-weight:600' }, i.no),
-        h('td', { class: 'mm1' }, i.name || h('span', { class: 'muted' }, '（未填名稱）'), editDot('issue:' + i.id), h('div', { class: 'muted', style: 'font-size:12px' }, i.group || '')),
-        h('td', { class: 'muted', style: 'white-space:nowrap' }, i.chapter || '—'),
-        h('td', null, stTag(i.status || '未開始')),
-        h('td', { class: 'muted', style: 'white-space:nowrap' }, dis.length ? '討論 ' + dis.length + ' 次' : '')));
-    });
-    const ckCard = frag.lastChild;
-    frag.insertBefore(card(chead('署方建議議題', '國土署提出、待確認的議題．不列入導讀分配．點一列看內容'), h('div', { class: 'tbl mc', style: 'margin-top:10px' }, h('table', null, h('thead', null, h('tr', null, h('th', null, '編號'), h('th', null, '議題'), h('th', null, '對應章節'), h('th', null, '狀態'), h('th', null, '討論'))), eb))), ckCard);
-  }
+  if (agIssues().length) frag.append(h('p', { class: 'cap', style: 'margin:4px 0 0' }, '國土署提出的議題（' + agIssues().length + ' 題）另列在「署方議題」頁，不列入導讀分配。', h('button', { class: 'kp-more', type: 'button', style: 'margin:0 0 0 8px', onclick: () => A.go('agency') }, '前往署方議題')));
 };
 /* ---------- 導讀時間軸：每場導讀的重點條列（存在 meetings/{id}.keys） ----------
    重點 { id, kind: dec 決議｜mem 要記住｜find 重要發現｜open 待釐清, text 一句話, detail 細節, issues [議題編號],
@@ -772,6 +758,83 @@ A.issueKeyCards = function (no) {
   if (!ks.length) return null;
   return h('div', { class: 'kp-list' }, ks.map(x => kpCard(x.m, x.k, x.i, { date: true, ro: true, inline: true })));
 };
+/* ---------- 署方議題：國土署提出、不屬成大議題案的議題，以及與國土署的往來紀錄 ----------
+   存在 issues/{id}：ag { state 處理狀態, stance 我方意見 }、talks [{ id, date, dir in 署方提出｜out 我方回覆｜meet 會議討論, via 管道, text, meeting }] */
+const AG_STATES = [['wait', '待我方回應', 't-warn'], ['study', '我方研議中', 't-blue'], ['sent', '已回覆署方', 't-teal'], ['done', '已定案', 't-good']];
+const AG_DIRS = [['in', '署方提出'], ['out', '我方回覆'], ['meet', '會議討論']];
+const AG_VIA = ['會議', '公文', 'Email', '電話', 'LINE', '其他'];
+const agIssues = () => S.issues.filter(i => !isCK(i)).sort((a, b) => a.no - b.no);
+A.agIssues = agIssues;
+const agState = i => (AG_STATES.find(x => x[0] === ((i.ag || {}).state || 'wait')) || AG_STATES[0]);
+const agTalks = i => [...(i.talks || [])].map((t, k) => ({ t, k })).sort((a, b) => ((a.t.date || '') < (b.t.date || '') ? 1 : (a.t.date || '') > (b.t.date || '') ? -1 : b.k - a.k));
+const agSaveTalks = (i, talks) => A.patch('issues', i.id, { talks });
+function agTalkEdit(i0, idx) {
+  const i = A.byId('issues', i0.id) || i0; const talks = (i.talks || []).map(x => Object.assign({}, x)); const isNew = idx == null;
+  const t = isNew ? { id: A.newId(), date: today(), dir: 'in', via: '會議', text: '', meeting: '' } : talks[idx]; if (!t) return;
+  let dir = t.dir || 'in';
+  const box = h('div', { class: 'cf', role: 'dialog', 'aria-modal': 'true' });
+  const seg = h('div', { class: 'seg' }); const drawSeg = () => seg.replaceChildren(...AG_DIRS.map(([v, n]) => h('button', { type: 'button', 'aria-pressed': String(dir === v), onclick: () => { dir = v; drawSeg(); } }, n))); drawSeg();
+  const date = h('input', { class: 'in', type: 'date', id: 'ag-date' }); date.value = t.date || today();
+  const via = h('select', { class: 'in', id: 'ag-via' }, AG_VIA.map(v => h('option', { value: v }, v))); via.value = t.via || '會議';
+  const ms = [...S.meetings].filter(m => m.date).sort((a, b) => (a.date < b.date ? 1 : -1));
+  const meet = h('select', { class: 'in', id: 'ag-meet' }, [h('option', { value: '' }, '（不連到會議）'), ...ms.map(m => h('option', { value: m.id }, A.roc(m.date) + '　' + (m.title || '會議')))]); meet.value = t.meeting || '';
+  const txt = h('textarea', { class: 'in', id: 'ag-text', rows: 4, placeholder: '署方說了什麼、我們怎麼回，例如：署方希望目標年期維持 2050 年，請我方補充國際案例' }); txt.value = t.text || '';
+  const save = () => { const v = txt.value.trim(); if (!v) { txt.focus(); return; }
+    const rec = Object.assign({}, t, { date: date.value || today(), dir, via: via.value, meeting: meet.value, text: v }); if (isNew) talks.push(rec); else talks[idx] = rec;
+    box.remove(); agSaveTalks(i, talks); };
+  const del = !isNew ? h('button', { class: 'btn danger', type: 'button', style: 'margin-right:auto', onclick: () => A.confirm('刪除這筆往來紀錄？', t.text, '刪除', () => { box.remove(); talks.splice(idx, 1); agSaveTalks(i, talks); }, true) }, '刪除') : '';
+  box.append(h('div', { class: 'cfb kp-ed' }, h('h3', null, isNew ? '新增往來紀錄' : '修改往來紀錄'), h('small', { class: 'muted' }, '議題 ' + i.no + '　' + (i.name || '')),
+    A.field('方向', seg, true), h('div', { class: 'fgrid' }, A.field('日期', date), A.field('管道', via)), A.field('相關會議', meet, true), A.field('內容', txt, true),
+    h('div', { class: 'act' }, del, h('button', { class: 'btn', type: 'button', onclick: () => box.remove() }, '取消'), h('button', { class: 'btn solid', type: 'button', onclick: save }, '儲存'))));
+  box.addEventListener('keydown', e => { if (e.key === 'Escape') box.remove(); });
+  document.body.append(box); setTimeout(() => txt.focus(), 30);
+}
+A.agTalkEdit = agTalkEdit;
+// 往來紀錄時間軸（新的在上）
+function agTalkList(i, opts) {
+  const ts = agTalks(i);
+  if (!ts.length) return h('p', { class: 'muted', style: 'margin:4px 0 0' }, '還沒有往來紀錄。');
+  const lim = opts && opts.limit && !S['agAll_' + i.id] ? opts.limit : 0;
+  const shown = lim ? ts.slice(0, lim) : ts;
+  const list = h('div', { class: 'ag-tl' }, shown.map(({ t, k }) => {
+    const m = t.meeting ? A.byId('meetings', t.meeting) : null;
+    return h('div', { class: 'ag-t d-' + (t.dir || 'in') + (S.canWrite ? ' ed' : ''), role: S.canWrite ? 'button' : null, tabindex: S.canWrite ? 0 : null, title: S.canWrite ? '點一下修改' : null,
+      onclick: () => { if (S.canWrite) agTalkEdit(i, k); }, onkeydown: e => { if (S.canWrite && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); agTalkEdit(i, k); } } },
+      h('div', { class: 'ag-d' }, h('b', null, A.md(t.date)), h('small', null, t.date ? String(A.parse(t.date).getFullYear() - 1911) : '')),
+      h('div', { class: 'ag-c' }, h('div', { class: 'ag-m' }, h('span', { class: 'ag-dir' }, (AG_DIRS.find(x => x[0] === t.dir) || AG_DIRS[0])[1]), t.via ? h('span', { class: 'muted' }, t.via) : '',
+        m ? h('button', { type: 'button', class: 'ag-mt', onclick: e => { e.stopPropagation(); A.openDrawer('meeting', m.id); } }, m.title || '會議') : ''),
+        h('p', null, t.text)));
+  }));
+  const more = lim && ts.length > lim ? h('button', { class: 'kp-more', type: 'button', onclick: () => { S['agAll_' + i.id] = true; A.render(); } }, '顯示全部 ' + ts.length + ' 筆') : '';
+  return h('div', null, list, more);
+}
+A.agTalkList = agTalkList;
+const agStateSel = i => S.canWrite ? A.sel((i.ag || {}).state || 'wait', AG_STATES.map(x => [x[0], x[1]]), v => A.patch('issues', i.id, { ag: Object.assign({}, i.ag || {}, { state: v }) }), { sm: true, id: 'ag-st-' + i.id })
+  : h('span', { class: 'tag ' + agState(i)[2] }, agState(i)[1]);
+A.pages.agency = function (frag) {
+  frag.append(h('div', { class: 'page-h' }, h('div', null, h('h1', null, '署方議題'), h('p', null, '國土署提出、待確認的議題，不列入成大議題案的導讀分配；每一題記下我們和國土署的來來回回。')),
+    h('div', { class: 'act' }, S.canWrite ? h('button', { class: 'btn', type: 'button', onclick: agNew }, '新增署方議題') : '')));
+  if (!readyGate(frag)) return;
+  const xs = agIssues();
+  if (!xs.length) { frag.append(card(h('div'), emptyBox('還沒有署方議題', '國土署提出新的議題時，按右上角「新增署方議題」記下來。'))); return; }
+  const cnt = k => xs.filter(i => ((i.ag || {}).state || 'wait') === k).length;
+  frag.append(h('div', { class: 'ag-sum' }, AG_STATES.map(([k, n, c]) => h('div', null, h('b', null, String(cnt(k))), h('span', { class: 'tag ' + c }, n))),
+    h('div', null, h('b', null, String(xs.reduce((a, i) => a + (i.talks || []).length, 0))), h('span', { class: 'muted' }, '筆往來紀錄'))));
+  xs.forEach(i => {
+    const stance = (i.ag || {}).stance || '';
+    frag.append(card(h('div', { class: 'ag-h' },
+        h('div', { class: 'ag-ti' }, h('span', { class: 'ag-no' }, i.no), h('div', null, h('h2', null, i.name || '（未填名稱）', editDot('issue:' + i.id)), h('small', { class: 'muted' }, [i.chapter, i.group].filter(Boolean).join('．')))),
+        h('div', { class: 'ag-r' }, agStateSel(i), h('button', { class: 'btn sm', type: 'button', onclick: () => A.openDrawer('issue', i.id) }, '看議題內容'))),
+      h('div', { class: 'pad' },
+        h('div', { class: 'ag-st' }, h('h4', null, '我方意見'), S.canWrite ? A.inp(stance, v => A.patch('issues', i.id, { ag: Object.assign({}, i.ag || {}, { stance: v }) }), { multi: true, ph: '我們目前的看法或處理方向，例如：建議維持 2050 年，另於手冊說明分期檢討', id: 'ag-stance-' + i.id }) : h('p', null, stance || '（尚未填寫）')),
+        h('div', { class: 'ag-st' }, h('h4', null, '往來紀錄', h('small', null, (i.talks || []).length + ' 筆')), agTalkList(i, { limit: 4 }),
+          S.canWrite ? h('button', { class: 'btn sm', type: 'button', style: 'margin-top:10px', onclick: () => agTalkEdit(i) }, '新增往來紀錄') : ''))));
+  });
+};
+function agNew() {
+  const next = Math.max(100, ...S.issues.map(i => Number(i.no) || 0)) + 1;
+  A.prompt('新增署方議題', '議題名稱', async v => { const id = A.newId(); if (await A.put('issues', id, { no: next, name: v, group: '署方待確認', chapter: '', status: '未開始', reader: '', notes: {}, ag: { state: 'wait', stance: '' }, talks: [], createdAt: new Date().toISOString() })) A.openDrawer('issue', id); });
+}
 // 成大議題案（總結報告第二章）24 項議題的正式名稱；資料庫裡還沒填名稱的會自動補上
 const ISSUE_NAMES = { 1: '國土計畫制度下之使用地類別編定用途', 2: '農業發展地區之土地使用及變更影響', 3: '原住民族土地使用及居住問題', 4: '既有合法土地使用權益保障情形', 5: '土地使用違規查處及檢舉獎勵制度', 6: '國土計畫法罰則執行原則', 7: '國土計畫法申請土地使用方式及與區域計畫法制度之銜接', 8: '海洋資源地區土地使用制度', 9: '確認後續全國國土計畫之國土永續發展目標', 10: '強化全國國土計畫對於直轄市、縣（市）國土計畫之銜接及指導性', 11: '城鄉發展及成長管理計畫之調整方式', 12: '宜維護農地管理策略', 13: '未來發展地區指認原則調整方式', 14: '強化國土功能分區劃設條件、土地使用指導事項與計畫引導間之關聯性及操作方式（含離島地區）', 15: '補充國土功能分區圖公告後，國土保育地區及其分類之檢討調整條件', 16: '補充國土功能分區圖公告後，農業發展地區及其分類之檢討調整條件', 17: '補充國土功能分區圖公告後，城鄉發展地區及其分類之檢討調整條件（含依原獎勵投資條例或原山坡地開發建築管理辦法同意（或許可）案件回歸按目的事業法令管制及其國土功能分區分類檢討調整）', 18: '補充漲價歸公之土地開發衡平機制', 19: '強化目的事業主管機關推動國土復育促進地區策略', 20: '強化各級國土計畫對外溝通及共識形成之機制', 21: '強化全國國土計畫對於鄉村地區計畫之銜接及指導性', 22: '強化部門空間發展策略對土地使用之指導方式', 23: '配合專法調整氣候變遷減緩及調適策略', 24: '處理跨域議題（含都會地區與特定地區）' };
 A.fillIssueNames = async function () {
@@ -1123,6 +1186,10 @@ A.drawers.issue = function (id) {
         A.field('報告頁碼', h('span', { class: 'muted num' }, i.pages ? '印刷頁 ' + i.pages[0] + '–' + i.pages[1] + '（' + n + ' 頁）' : '未設定')),
         A.field('狀態', A.sel(i.status || '未開始', ISTATUS, v => up({ status: v }), { id: 'i-st' })), A.field('摘要期限', A.inp(i.summaryDue, v => up({ summaryDue: v }), { type: 'date', id: 'i-due' })),
         A.field('處理方式', A.sel(i.handling || '', [['', '待定'], '修正全國國土計畫', '修正其他相關規定', '不修'], v => up({ handling: v }), { id: 'i-hand' })), A.field('對應章節', A.inp(i.chapter, v => up({ chapter: v }), { id: 'i-chap', ph: '例如：第八章' })))),
+    !isCK(i) ? h('div', { class: 'sec' }, h('h4', null, '與國土署往來', h('small', null, (i.talks || []).length + ' 筆．新的在上面')),
+      h('div', { class: 'fgrid' }, A.field('處理狀態', agStateSel(i))),
+      A.field('我方意見', A.inp((i.ag || {}).stance, v => up({ ag: Object.assign({}, i.ag || {}, { stance: v }) }), { multi: true, id: 'i-agst' }), true),
+      agTalkList(i), S.canWrite ? h('button', { class: 'btn sm', type: 'button', style: 'margin-top:10px', onclick: () => agTalkEdit(i) }, '新增往來紀錄') : '') : '',
     (c => c ? h('div', { class: 'sec' }, h('h4', null, '導讀重點', h('small', null, '歷次導讀整理的重點．點一行看細節')), c) : '')(A.issueKeyCards(i.no)),
     h('div', { class: 'sec' }, h('h4', null, '導讀內容', h('small', null, '照報告每個議題的四段，加上實務對照與待釐清')), note('bg', '背景'), note('content', '主要內容'), note('qa', '外界問答'), note('next', '後續研議'), note('practice', '實務對照'), note('open', '待釐清')),
     h('div', { class: 'sec' }, h('h4', null, '歷次討論', h('small', null, dis.length + ' 場會議')), hist),
