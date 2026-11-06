@@ -652,7 +652,8 @@ A.pages.issues = function (frag) {
         h('td', null, stTag(i.status || '未開始')),
         h('td', { class: 'muted', style: 'white-space:nowrap' }, dis.length ? '討論 ' + dis.length + ' 次' : '')));
     });
-    frag.append(card(chead('署方建議議題', '國土署提出、待確認的議題．不列入導讀分配．點一列看內容'), h('div', { class: 'tbl mc', style: 'margin-top:10px' }, h('table', null, h('thead', null, h('tr', null, h('th', null, '編號'), h('th', null, '議題'), h('th', null, '對應章節'), h('th', null, '狀態'), h('th', null, '討論'))), eb))));
+    const ckCard = frag.lastChild;
+    frag.insertBefore(card(chead('署方建議議題', '國土署提出、待確認的議題．不列入導讀分配．點一列看內容'), h('div', { class: 'tbl mc', style: 'margin-top:10px' }, h('table', null, h('thead', null, h('tr', null, h('th', null, '編號'), h('th', null, '議題'), h('th', null, '對應章節'), h('th', null, '狀態'), h('th', null, '討論'))), eb))), ckCard);
   }
 };
 /* ---------- 導讀時間軸：每場導讀的重點條列（存在 meetings/{id}.keys） ----------
